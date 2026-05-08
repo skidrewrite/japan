@@ -2180,7 +2180,7 @@ run(function()
 		if (ent.Health or 0) <= 0 then return false end
 		local dist = (ent.RootPart.Position - entitylib.character.RootPart.Position).Magnitude
 		if dist > Distance.Value then return false end
-		if getAccountTier(ent.Player) >= 1 and getAccountTier(lplr) == 0 then return false end
+		if getAccountTier(ent.Player) >= 1 and getAccountTier(ent.Player) < 99 and getAccountTier(lplr) == 0 then return false end
 		return true
 	end
 
@@ -2828,7 +2828,7 @@ run(function()
                 playerFound = findPlayer(label, container)
             end
             if not playerFound then return end
-            if getAccountTier(playerFound) >= 4 and getAccountTier(lplr) == 0 then return end
+            if getAccountTier(playerFound) >= 4 and getAccountTier(playerFound) < 99 and getAccountTier(lplr) == 0 then return end
             
             container.Name = playerFound.Name
             local card = container:FindFirstChild("1") and container["1"]:FindFirstChild("MatchDraftPlayerCard")
@@ -2887,7 +2887,7 @@ run(function()
             if not userId then return end
             local plr = playersService:GetPlayerByUserId(tonumber(userId))
             if not plr then return end
-            if getAccountTier(plr) >= 4 and getAccountTier(lplr) == 0 then return end
+            if getAccountTier(plr) >= 4 and getAccountTier(plr) < 99 and getAccountTier(lplr) == 0 then return end
             local loopKey = plr.UserId
             processedPlayers[loopKey] = true
             if activeConnections[loopKey] then activeConnections[loopKey]:Disconnect() activeConnections[loopKey] = nil end
@@ -4769,8 +4769,7 @@ run(function()
         return false
     end
 
-    local _t4HitCount = {}
-    local _t4HitTick = {}
+    local _t4LastHit = {}
 
     local function FireAttackRemote(attackTable, ...)
         if not AttackRemote then return end
@@ -4781,16 +4780,11 @@ run(function()
         local t4plr = _atkPlr
         if t4ok and t4plr then
             local targetTier = getAccountTier(t4plr)
-            if targetTier >= 99 then return end
-            if targetTier >= 4 and getAccountTier(lplr) == 0 then
+            if targetTier >= 4 and targetTier < 99 and getAccountTier(lplr) == 0 then
                 local uid = t4plr.UserId
                 local now = tick()
-                if not _t4HitTick[uid] or now - _t4HitTick[uid] >= 10 then
-                    _t4HitTick[uid] = now
-                    _t4HitCount[uid] = 0
-                end
-                _t4HitCount[uid] = (_t4HitCount[uid] or 0) + 1
-                if _t4HitCount[uid] > 32 then return end
+                if _t4LastHit[uid] and now - _t4LastHit[uid] < (10/32) then return end
+                _t4LastHit[uid] = now
             end
         end
 
@@ -6794,16 +6788,11 @@ run(function()
 									local suc, plr = pcall(function() return playersService:GetPlayerFromCharacter(v.Character) end)
 									if suc and plr then
 										local targetTier = getAccountTier(plr)
-										if targetTier >= 99 then continue end
-										if targetTier >= 4 and getAccountTier(lplr) == 0 then
+										if targetTier >= 4 and targetTier < 99 and getAccountTier(lplr) == 0 then
 											local uid = plr.UserId
 											local now = tick()
-											if not _t4HitTick[uid] or now - _t4HitTick[uid] >= 10 then
-												_t4HitTick[uid] = now
-												_t4HitCount[uid] = 0
-											end
-											_t4HitCount[uid] = (_t4HitCount[uid] or 0) + 1
-											if _t4HitCount[uid] > 32 then continue end
+											if _t4LastHit[uid] and now - _t4LastHit[uid] < (10/32) then continue end
+											_t4LastHit[uid] = now
 										end
 									end
 								end
@@ -7320,7 +7309,7 @@ run(function()
             if not Targets.Players.Enabled and ent.Player then continue end
             if (not Targets.NPCs or not Targets.NPCs.Enabled) and ent.NPC then continue end
             if not ent.Targetable then continue end
-			if ent.Player and getAccountTier(ent.Player) >= 1 and getAccountTier(lplr) == 0 then continue end
+			if ent.Player and getAccountTier(ent.Player) >= 1 and getAccountTier(ent.Player) < 99 and getAccountTier(lplr) == 0 then continue end
             if not ent.Character or not ent.RootPart or not ent.RootPart.Parent then continue end
 
             local delta = ent.RootPart.Position - originPos
@@ -9330,11 +9319,33 @@ run(function()
         return ''
     end
 
+    -- Helper to get the proper display name for boss entities
+    local function getBossDisplayName(ent)
+        if not ent.NPC or not ent.Character then return nil end
+        local char = ent.Character
+        -- Detect Bhaa boss via attributes, name, or unique part
+        if char:GetAttribute("BossType") == "Bhaa" then
+            return "Bhaa"
+        end
+        if char.Name:lower() == "bhaa" then
+            return "Bhaa"
+        end
+        if char:FindFirstChild("BhaaModel") or char:FindFirstChild("BhaaHead") then
+            return "Bhaa"
+        end
+        -- If name is Titan and none of the above, assume it's Titan
+        if char.Name == "Titan" then
+            return "Titan"
+        end
+        return nil
+    end
+
     local Added = {
-		Normal = function(ent)
+        Normal = function(ent)
             if not Targets.Players.Enabled and ent.Player then return end
             local bossNames = {Titan = true, Bhaa = true}
             local isBoss = ent.NPC and ent.Character and bossNames[ent.Character.Name] == true
+            local bossDisplayName = isBoss and getBossDisplayName(ent) or nil
             if isBoss then
                 if not BossESP.Enabled then return end
             else
@@ -9342,11 +9353,13 @@ run(function()
                 if Teammates.Enabled and (not ent.Targetable) and (not ent.Friend) then return end
             end
             if not ent.Player and ent.Character and not ent.Character:FindFirstChildOfClass('Humanoid') then return end
-            Strings[ent] = ent.Player and whitelist:tag(ent.Player, true) .. (DisplayName.Enabled and ent.Player.DisplayName or ent.Player.Name) or ent.Character.Name
 
-            if ent.Player and getAccountTier(lplr) >= 4 then
+            local entityName = bossDisplayName or (ent.Player and nil) or ent.Character.Name
+            Strings[ent] = ent.Player and whitelist:tag(ent.Player, true) .. (DisplayName.Enabled and ent.Player.DisplayName or ent.Player.Name) or entityName
+
+            if ent.Player and getAccountTier(lplr) > 0 then
                 local injData = getgenv()._aeroInjectedUsers and getgenv()._aeroInjectedUsers[ent.Player.UserId]
-                if injData then
+                if injData and getAccountTier(lplr) > injData.tier then
                     Strings[ent] = '<font color="#00FF88">[T'..tostring(injData.tier)..']</font> ' .. Strings[ent]
                 end
             end
@@ -9467,7 +9480,7 @@ run(function()
                 end
             end
 
-            if Rank.Enabled and ent.Player and not (getAccountTier(ent.Player) >= 1 and getAccountTier(lplr) == 0) then
+            if Rank.Enabled and ent.Player and not (getAccountTier(ent.Player) >= 1 and getAccountTier(ent.Player) < 99 and getAccountTier(lplr) == 0) then
                 local rankIcon = Instance.new('ImageLabel')
                 rankIcon.Name = 'RankIcon'
                 rankIcon.Size = udim2fromOffset(30, 30)
@@ -9500,7 +9513,7 @@ run(function()
                 end)
             end
 
-            if GloopIndicator and GloopIndicator.Enabled and ent.Character and not (ent.Player and getAccountTier(ent.Player) >= 1 and getAccountTier(lplr) == 0) then
+            if GloopIndicator and GloopIndicator.Enabled and ent.Character and not (ent.Player and getAccountTier(ent.Player) >= 1 and getAccountTier(ent.Player) < 99 and getAccountTier(lplr) == 0) then
                 local gloopIcon = Instance.new('ImageLabel')
                 gloopIcon.Name = 'GloopIcon'
                 gloopIcon.Size = udim2fromOffset(24, 24)
@@ -9530,7 +9543,7 @@ run(function()
                 end)
             end
 
-            if Enchant.Enabled and ent.Player and ent.Character and not (getAccountTier(ent.Player) >= 1 and getAccountTier(lplr) == 0) then
+            if Enchant.Enabled and ent.Player and ent.Character and not (getAccountTier(ent.Player) >= 1 and getAccountTier(ent.Player) < 99 and getAccountTier(lplr) == 0) then
                 local Icon = Instance.new('ImageLabel')
                 Icon.Name = 'EnchantIcon'
                 Icon.Size = udim2fromOffset(30, 30)
@@ -9555,10 +9568,11 @@ run(function()
             lastUpdate[ent] = 0
         end,
 
-		Drawing = function(ent)
+        Drawing = function(ent)
             if not Targets.Players.Enabled and ent.Player then return end
             local bossNames = {Titan = true, Bhaa = true}
             local isBoss = ent.NPC and ent.Character and bossNames[ent.Character.Name] == true
+            local bossDisplayName = isBoss and getBossDisplayName(ent) or nil
             if isBoss then
                 if not BossESP.Enabled then return end
             else
@@ -9577,7 +9591,9 @@ run(function()
             nametag.Text.Size = 15 * Scale.Value
             nametag.Text.Font = 0
             nametag.Text.ZIndex = 2
-            Strings[ent] = ent.Player and whitelist:tag(ent.Player, true) .. (DisplayName.Enabled and ent.Player.DisplayName or ent.Player.Name) or ent.Character.Name
+
+            local entityName = bossDisplayName or (ent.Player and nil) or ent.Character.Name
+            Strings[ent] = ent.Player and whitelist:tag(ent.Player, true) .. (DisplayName.Enabled and ent.Player.DisplayName or ent.Player.Name) or entityName
 
             if Health.Enabled then
                 local c = getHealthColor(ent)
@@ -9655,11 +9671,15 @@ run(function()
             lastUpdate[ent] = now
 
             Sizes[ent] = nil
-            Strings[ent] = ent.Player and whitelist:tag(ent.Player, true) .. (DisplayName.Enabled and ent.Player.DisplayName or ent.Player.Name) or ent.Character.Name
+            local bossNames = {Titan = true, Bhaa = true}
+            local isBoss = ent.NPC and ent.Character and bossNames[ent.Character.Name] == true
+            local bossDisplayName = isBoss and getBossDisplayName(ent) or nil
+            local entityName = bossDisplayName or (ent.Player and nil) or ent.Character.Name
+            Strings[ent] = ent.Player and whitelist:tag(ent.Player, true) .. (DisplayName.Enabled and ent.Player.DisplayName or ent.Player.Name) or entityName
 
-            if ent.Player and getAccountTier(lplr) >= 4 then
+            if ent.Player and getAccountTier(lplr) > 0 then
                 local injData = getgenv()._aeroInjectedUsers and getgenv()._aeroInjectedUsers[ent.Player.UserId]
-                if injData then
+                if injData and getAccountTier(lplr) > injData.tier then
                     Strings[ent] = '<font color="#00FF88">[T'..tostring(injData.tier)..']</font> ' .. Strings[ent]
                 end
             end
@@ -9710,7 +9730,11 @@ run(function()
             if nametag then
                 if vape.ThreadFix then setthreadidentity(8) end
                 Sizes[ent] = nil
-                Strings[ent] = ent.Player and whitelist:tag(ent.Player, true) .. (DisplayName.Enabled and ent.Player.DisplayName or ent.Player.Name) or ent.Character.Name
+                local bossNames = {Titan = true, Bhaa = true}
+                local isBoss = ent.NPC and ent.Character and bossNames[ent.Character.Name] == true
+                local bossDisplayName = isBoss and getBossDisplayName(ent) or nil
+                local entityName = bossDisplayName or (ent.Player and nil) or ent.Character.Name
+                Strings[ent] = ent.Player and whitelist:tag(ent.Player, true) .. (DisplayName.Enabled and ent.Player.DisplayName or ent.Player.Name) or entityName
 
                 if Health.Enabled then
                     Strings[ent] = Strings[ent]..' '..math.round(ent.Health)
@@ -10368,7 +10392,7 @@ run(function()
 						})
 
 						if entity then
-							if getAccountTier(entity.Player) >= 4 and getAccountTier(lplr) == 0 then continue end
+							if getAccountTier(entity.Player) >= 4 and getAccountTier(entity.Player) < 99 and getAccountTier(lplr) == 0 then continue end
 							store.BedAlarmIsTrigged = true
 
 							if ShowAlarm.Enabled then
@@ -13544,7 +13568,7 @@ run(function()
 				event = Instance.new('BindableEvent')
 				AutoTool:Clean(event)
 				AutoTool:Clean(event.Event:Connect(function()
-					contextActionService:CallFunction('block-break', Enum.UserInputState.Begin, newproxy(true))
+					pcall(contextActionService.CallFunction, contextActionService, 'block-break', Enum.UserInputState.Begin, newproxy(true))
 				end))
 				old = bedwars.BlockBreaker.hitBlock
 				bedwars.BlockBreaker.hitBlock = function(self, maid, raycastparams, ...)
@@ -15123,7 +15147,7 @@ run(function()
         local _bpUserId = v:GetAttribute('PlacedByUserId')
         if _bpUserId then
             local _bpOk, _bpOwner = pcall(function() return playersService:GetPlayerByUserId(_bpUserId) end)
-            if _bpOk and _bpOwner and getAccountTier(_bpOwner) >= 4 and getAccountTier(lplr) == 0 then return end
+            if _bpOk and _bpOwner and getAccountTier(_bpOwner) >= 4 and getAccountTier(_bpOwner) < 99 and getAccountTier(lplr) == 0 then return end
         end
         
         local billboard = Instance.new('BillboardGui')
@@ -15607,7 +15631,7 @@ run(function()
 		local target, path, endpos = bedwars.breakBlock(v, Effect.Enabled, Animation.Enabled, wrappedHealthbar, InstantBreak.Enabled or AutoTool.Enabled)
 		if path and ShowPath and ShowPath.Enabled then
 			local placerTier = getPlacerTier(v)
-			if placerTier == 4 and getAccountTier(lplr) == 0 then
+			if placerTier == 4 and placerTier < 99 and getAccountTier(lplr) == 0 then
 				task.wait(0.65 + math.random() * 0.4)  
 			end
 			local currentnode = target
@@ -19010,7 +19034,7 @@ run(function()
     local function CreatePlayerTag(plr, isLocal)
         if not OGNametags or not OGNametags.Enabled then return end
         if isLocal and HideOwnNametag and HideOwnNametag.Enabled then return end
-        if not isLocal and getAccountTier(plr) >= 4 and getAccountTier(lplr) == 0 then return end
+        if not isLocal and getAccountTier(plr) >= 4 and getAccountTier(plr) < 99 and getAccountTier(lplr) == 0 then return end
 
         local char = plr.Character
         if not char then return end
@@ -19325,7 +19349,7 @@ run(function()
         local _bpUserId = v:GetAttribute('PlacedByUserId')
         if _bpUserId then
             local _bpOk, _bpOwner = pcall(function() return playersService:GetPlayerByUserId(_bpUserId) end)
-            if _bpOk and _bpOwner and getAccountTier(_bpOwner) >= 4 and getAccountTier(lplr) == 0 then return end
+            if _bpOk and _bpOwner and getAccountTier(_bpOwner) >= 4 and getAccountTier(_bpOwner) < 99 and getAccountTier(lplr) == 0 then return end
         end
         
         local billboard = Instance.new('BillboardGui')
@@ -21819,7 +21843,7 @@ run(function()
         local _bpUserId = v:GetAttribute('PlacedByUserId')
         if _bpUserId then
             local _bpOk, _bpOwner = pcall(function() return playersService:GetPlayerByUserId(_bpUserId) end)
-            if _bpOk and _bpOwner and getAccountTier(_bpOwner) >= 4 and getAccountTier(lplr) == 0 then return end
+            if _bpOk and _bpOwner and getAccountTier(_bpOwner) >= 4 and getAccountTier(_bpOwner) < 99 and getAccountTier(lplr) == 0 then return end
         end
         
         local billboard = Instance.new('BillboardGui')
@@ -22218,7 +22242,7 @@ run(function()
         local _bpUserId = v:GetAttribute('PlacedByUserId')
         if _bpUserId then
             local _bpOk, _bpOwner = pcall(function() return playersService:GetPlayerByUserId(_bpUserId) end)
-            if _bpOk and _bpOwner and getAccountTier(_bpOwner) >= 4 and getAccountTier(lplr) == 0 then return end
+            if _bpOk and _bpOwner and getAccountTier(_bpOwner) >= 4 and getAccountTier(_bpOwner) < 99 and getAccountTier(lplr) == 0 then return end
         end
         
         local billboard = Instance.new('BillboardGui')
@@ -25710,7 +25734,7 @@ run(function()
         local _bpUserId = v:GetAttribute('PlacedByUserId')
         if _bpUserId then
             local _bpOk, _bpOwner = pcall(function() return playersService:GetPlayerByUserId(_bpUserId) end)
-            if _bpOk and _bpOwner and getAccountTier(_bpOwner) >= 4 and getAccountTier(lplr) == 0 then return end
+            if _bpOk and _bpOwner and getAccountTier(_bpOwner) >= 4 and getAccountTier(_bpOwner) < 99 and getAccountTier(lplr) == 0 then return end
         end
         
         local billboard = Instance.new('BillboardGui')
@@ -26881,7 +26905,7 @@ run(function()
                 end
             end
 
-            if getAccountTier(plr) >= 1 and getAccountTier(lplr) == 0 then return end
+            if getAccountTier(plr) >= 1 and getAccountTier(plr) < 99 and getAccountTier(lplr) == 0 then return end
             local playerName = getPlayerName(plr)
             local teamName = getTeamName(plr)
             local loot = string.format("%d irons, %d diamonds, %d emeralds", I, D, E)
@@ -26913,7 +26937,7 @@ run(function()
                         local difference = currentCandy - data.lastCandy
 
                         if difference > 0 and data.player then
-                            if not (getAccountTier(data.player) >= 1 and getAccountTier(lplr) == 0) then
+                            if not (getAccountTier(data.player) >= 1 and getAccountTier(data.player) < 99 and getAccountTier(lplr) == 0) then
                                 local playerName = getPlayerName(data.player)
                                 local teamName = getTeamName(data.player)
 
@@ -26932,7 +26956,7 @@ run(function()
                         local timeSincePlaced = tick() - (data.placedTime or tick())
 
                         if timeSincePlaced > 2 then
-                            if not (getAccountTier(data.player) >= 1 and getAccountTier(lplr) == 0) then
+                            if not (getAccountTier(data.player) >= 1 and getAccountTier(data.player) < 99 and getAccountTier(lplr) == 0) then
                                 local playerName = getPlayerName(data.player)
                                 local teamName = getTeamName(data.player)
 
@@ -27949,7 +27973,8 @@ run(function()
 							local currentplr = playersService:GetPlayerFromCharacter(char)
 							if currentplr and currentplr.Team == lplr.Team then return end
 						end
-						if getAccountTier(playersService:GetPlayerFromCharacter(char)) >= 4 and getAccountTier(lplr) == 0 then return end
+						local _fishChar = playersService:GetPlayerFromCharacter(char)
+					if _fishChar and getAccountTier(_fishChar) >= 4 and getAccountTier(_fishChar) < 99 and getAccountTier(lplr) == 0 then return end
 						notif("FishermanSpy", str .. " caught a " .. strfish .. lootText, 8)
 					end))
 				end)
@@ -28022,7 +28047,7 @@ run(function()
         local ownerName = getBeehiveOwnerName(beehive)
 		local owner = getBeehiveOwner(beehive)
 		if not owner then return end
-		if getAccountTier(owner) >= 1 and getAccountTier(lplr) == 0 then return end
+		if getAccountTier(owner) >= 1 and getAccountTier(owner) < 99 and getAccountTier(lplr) == 0 then return end
 
         local billboard = Instance.new('BillboardGui')
         billboard.Parent = BeehiveFolder
@@ -28279,7 +28304,7 @@ run(function()
                 end
             end
 
-            if getAccountTier(plr) >= 1 and getAccountTier(lplr) == 0 then return end
+            if getAccountTier(plr) >= 1 and getAccountTier(plr) < 99 and getAccountTier(lplr) == 0 then return end
             local playerName = getPlayerName(plr)
             local teamName   = getTeamName(plr)
             local loot = string.format("%d irons, %d diamonds, %d emeralds", I, D, E)
@@ -28328,7 +28353,7 @@ run(function()
                     if data.exists and data.player then
                         local timeSincePlaced = tick() - (data.placedTime or tick())
                         if timeSincePlaced > 2 then
-                            if not (getAccountTier(data.player) >= 1 and getAccountTier(lplr) == 0) then
+                            if not (getAccountTier(data.player) >= 1 and getAccountTier(data.player) < 99 and getAccountTier(lplr) == 0) then
                             local playerName = getPlayerName(data.player)
                             local teamName   = getTeamName(data.player)
                             vape:CreateNotification(
@@ -31747,7 +31772,7 @@ run(function()
         local _bpUserId = v:GetAttribute('PlacedByUserId')
         if _bpUserId then
             local _bpOk, _bpOwner = pcall(function() return playersService:GetPlayerByUserId(_bpUserId) end)
-            if _bpOk and _bpOwner and getAccountTier(_bpOwner) >= 4 and getAccountTier(lplr) == 0 then return end
+            if _bpOk and _bpOwner and getAccountTier(_bpOwner) >= 4 and getAccountTier(_bpOwner) < 99 and getAccountTier(lplr) == 0 then return end
         end
         
         local billboard = Instance.new('BillboardGui')
@@ -33373,7 +33398,7 @@ run(function()
                         })
 
                         if target then
-							if getAccountTier(target.Player) >= 1 and getAccountTier(lplr) == 0 then continue end
+							if getAccountTier(target.Player) >= 1 and getAccountTier(target.Player) < 99 and getAccountTier(lplr) == 0 then continue end
                             local selfpos = entitylib.character.RootPart.Position
                             local localfacing = entitylib.character.RootPart.CFrame.LookVector * Vector3.new(1, 0, 1)
                             local delta = (target.RootPart.Position - selfpos) * Vector3.new(1, 0, 1)
@@ -33676,7 +33701,7 @@ run(function()
 		for _, ent in ipairs(entitylib.List) do
 			if not ent.Targetable then continue end
 			if not ent.Player then continue end
-			if getAccountTier(ent.Player) >= 4 and getAccountTier(lplr) == 0 then continue end
+			if getAccountTier(ent.Player) >= 4 and getAccountTier(ent.Player) < 99 and getAccountTier(lplr) == 0 then continue end
 
 
 			local distanceVector = ent.RootPart.Position - bedPosition
@@ -34521,6 +34546,319 @@ run(function()
 		Default = 'Me',
 		Placeholder = 'Enter name...',
 		Function = function(value)
+		end
+	})
+end)
+
+run(function()
+	local CHAT_URL = "https://erp-promises-elected-reminder.trycloudflare.com"
+	local CHAT_SECRET = "aero_f8c3de1d98f54f29a56c88a5c8b7d3e2a1f0e9d"
+
+	local _req = (syn and syn.request) or (http_request and function(t) return http_request(t) end) or request or function() return {Body='{}'} end
+
+	local pollThread = nil
+	local lastTime = 0
+	local messageFrames = {}
+	local chatGui = nil
+	local msgScroll = nil
+	local chatInputBox = nil
+	local chatSendBtn = nil
+	local editingId = nil
+	local replyingTo = nil
+	if not getgenv().aeroChatCustomName then getgenv().aeroChatCustomName = '' end
+	local customChatName = getgenv().aeroChatCustomName
+	local msgDataCache = {}
+	local replyBanner = nil
+
+	local function getMyId() return tostring(lplr.UserId) end
+	local function getMyName() return (customChatName ~= '') and customChatName or lplr.DisplayName or lplr.Name end
+	local function genId() return tostring(lplr.UserId) .. '_' .. tostring(math.floor(tick() * 1000)) end
+
+	local function chatRequest(body, useAuth)
+		local headers = {['Content-Type'] = 'application/json'}
+		if useAuth then headers['Authorization'] = 'Bearer ' .. CHAT_SECRET end
+		local ok, res = pcall(_req, {
+			Url = CHAT_URL .. '/chat',
+			Method = 'POST',
+			Headers = headers,
+			Body = httpService:JSONEncode(body)
+		})
+		if not ok then return nil end
+		local dok, data = pcall(httpService.JSONDecode, httpService, res.Body)
+		if not dok then return nil end
+		return data
+	end
+
+	local function clearReply()
+		replyingTo = nil
+		if replyBanner then replyBanner.Visible = false end
+	end
+
+	local function sendCurrentMessage()
+		if not chatInputBox then return end
+		local msg = chatInputBox.Text
+		if msg == '' or msg:match('^%s*$') then return end
+		if editingId then
+			chatRequest({action='chat_edit', robloxUserId=getMyId(), messageId=editingId, newMessage=msg}, true)
+			editingId = nil
+			chatInputBox.PlaceholderText = 'Message...'
+			if chatSendBtn then chatSendBtn.Text = '➤' chatSendBtn.BackgroundColor3 = Color3.fromRGB(80,140,255) end
+		else
+			chatRequest({action='chat_send', robloxUserId=getMyId(), displayName=getMyName(), message=msg, messageId=genId(), replyTo=replyingTo and replyingTo.messageId or nil, tier=1}, true)
+			clearReply()
+		end
+		chatInputBox.Text = ''
+	end
+
+	local function addMessageUI(msg)
+		if not msgScroll then return end
+		msgDataCache[msg.messageId] = msg
+		if messageFrames[msg.messageId] then
+			if msg.edited then
+				msgDataCache[msg.messageId].message = msg.message
+				msgDataCache[msg.messageId].edited = true
+				local lbl = messageFrames[msg.messageId]:FindFirstChild('MsgText')
+				local cached = msgDataCache[msg.messageId]
+				if lbl and cached then
+					local mine = cached.robloxUserId == getMyId()
+					local nc = mine and 'rgb(100,180,255)' or 'rgb(230,230,255)'
+					lbl.Text = '<font color="'..nc..'" weight="bold">'..cached.displayName..'</font>: '..msg.message..' (edited)'
+				end
+			end
+			return
+		end
+		local isMine = msg.robloxUserId == getMyId()
+		local myName = getMyName():lower()
+		local robloxName = lplr.Name:lower()
+		local msgLower = msg.message:lower()
+		local isPinged =
+			(msgLower:find('@'..myName, 1, true) ~= nil) or
+			(msgLower:find('@'..robloxName, 1, true) ~= nil) or
+			(msg.replyTo ~= nil and msgDataCache[msg.replyTo] ~= nil and msgDataCache[msg.replyTo].robloxUserId == getMyId())
+		local mf = Instance.new('Frame')
+		mf.Name = msg.messageId
+		mf.AutomaticSize = Enum.AutomaticSize.Y
+		mf.Size = UDim2.new(1,0,0,0)
+		mf.BackgroundColor3 = isPinged and Color3.fromRGB(80,65,0) or Color3.fromRGB(0,0,0)
+		mf.BackgroundTransparency = isPinged and 0.15 or 1
+		mf.BorderSizePixel = 0
+		mf.LayoutOrder = msg.timestamp
+		local pad = Instance.new('UIPadding')
+		pad.PaddingLeft = UDim.new(0,4) pad.PaddingRight = UDim.new(0,4)
+		pad.PaddingTop = UDim.new(0,1) pad.PaddingBottom = UDim.new(0,1)
+		pad.Parent = mf
+		if msg.replyTo then
+			local rd = msgDataCache[msg.replyTo]
+			local rtl = Instance.new('TextLabel')
+			rtl.Size = UDim2.new(1,-4,0,13)
+			rtl.BackgroundTransparency = 1
+			rtl.Text = '| ' .. (rd and rd.displayName..': '..rd.message:sub(1,42) or '(message)')
+			rtl.TextColor3 = Color3.fromRGB(110,120,165)
+			rtl.TextSize = 10 rtl.Font = Enum.Font.Gotham
+			rtl.TextXAlignment = Enum.TextXAlignment.Left
+			rtl.TextTruncate = Enum.TextTruncate.AtEnd rtl.Parent = mf
+		end
+		local nameColor = isMine and 'rgb(100,180,255)' or (isPinged and 'rgb(255,215,70)' or 'rgb(230,230,255)')
+		local ml = Instance.new('TextLabel')
+		ml.Name = 'MsgText'
+		ml.Size = UDim2.new(1, isMine and -54 or -28, 0, 0)
+		ml.Position = msg.replyTo and UDim2.new(0,0,0,14) or UDim2.new(0,0,0,0)
+		ml.AutomaticSize = Enum.AutomaticSize.Y
+		ml.BackgroundTransparency = 1
+		ml.RichText = true
+		ml.Text = '<font color="'..nameColor..'" weight="bold">'..msg.displayName..'</font>: '..msg.message..(msg.edited and ' <font color="rgb(140,140,140)">(edited)</font>' or '')
+		ml.TextColor3 = Color3.fromRGB(210,215,235)
+		ml.TextSize = 13 ml.Font = Enum.Font.Gotham
+		ml.TextXAlignment = Enum.TextXAlignment.Left
+		ml.TextWrapped = true ml.Parent = mf
+		local replyBtn = Instance.new('TextButton')
+		replyBtn.Size = UDim2.new(0,22,0,14)
+		replyBtn.Position = UDim2.new(1,-24,0,msg.replyTo and 14 or 0)
+		replyBtn.BackgroundTransparency = 1
+		replyBtn.Text = 'Re'
+		replyBtn.TextColor3 = Color3.fromRGB(80,100,165)
+		replyBtn.TextSize = 9 replyBtn.Font = Enum.Font.Gotham replyBtn.Parent = mf
+		replyBtn.MouseButton1Click:Connect(function()
+			replyingTo = msg
+			if replyBanner then
+				replyBanner.Visible = true
+				local rl = replyBanner:FindFirstChild('ReplyLabel')
+				if rl then rl.Text = '>> replying to '..msg.displayName..': '..msg.message:sub(1,36) end
+			end
+			if chatInputBox then chatInputBox:CaptureFocus() end
+		end)
+		if isMine then
+			local eb = Instance.new('TextButton')
+			eb.Size = UDim2.new(0,26,0,14)
+			eb.Position = UDim2.new(1,-52,0,msg.replyTo and 14 or 0)
+			eb.BackgroundTransparency = 1
+			eb.Text = 'Edit'
+			eb.TextColor3 = Color3.fromRGB(70,140,70)
+			eb.TextSize = 9 eb.Font = Enum.Font.Gotham eb.Parent = mf
+			eb.MouseButton1Click:Connect(function()
+				editingId = msg.messageId
+				if chatInputBox then chatInputBox.Text = msg.message chatInputBox.PlaceholderText = 'Editing message...' end
+				if chatSendBtn then chatSendBtn.Text = 'Edit' chatSendBtn.BackgroundColor3 = Color3.fromRGB(200,140,0) end
+			end)
+		end
+		mf.Parent = msgScroll
+		messageFrames[msg.messageId] = mf
+		task.defer(function() if msgScroll then msgScroll.CanvasPosition = Vector2.new(0, msgScroll.AbsoluteCanvasSize.Y) end end)
+	end
+
+	local function buildGui()
+		if chatGui then pcall(function() chatGui:Destroy() end) end
+		messageFrames = {} editingId = nil replyingTo = nil msgDataCache = {}
+		local sg = Instance.new('ScreenGui')
+		sg.Name = 'AeroV4Chat' sg.ResetOnSpawn = false
+		sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+		local frame = Instance.new('Frame')
+		frame.Name = 'ChatFrame' frame.Size = UDim2.new(0,360,0,450)
+		frame.Position = UDim2.new(0,10,0.5,-225)
+		frame.BackgroundColor3 = Color3.fromRGB(8,10,22) frame.BackgroundTransparency = 0.08
+		frame.BorderSizePixel = 0 frame.Active = true frame.Draggable = true
+		local fc = Instance.new('UICorner') fc.CornerRadius = UDim.new(0,16) fc.Parent = frame
+		local fs = Instance.new('UIStroke') fs.Color = Color3.fromRGB(70,95,210) fs.Thickness = 1 fs.Transparency = 0.45 fs.Parent = frame
+		frame.Parent = sg
+		local tb = Instance.new('Frame')
+		tb.Size = UDim2.new(1,0,0,36)
+		tb.BackgroundColor3 = Color3.fromRGB(12,16,42) tb.BackgroundTransparency = 0.25 tb.BorderSizePixel = 0 tb.Parent = frame
+		local tbc = Instance.new('UICorner') tbc.CornerRadius = UDim.new(0,16) tbc.Parent = tb
+		local tbfix = Instance.new('Frame')
+		tbfix.Size = UDim2.new(1,0,0.5,0) tbfix.Position = UDim2.new(0,0,0.5,0)
+		tbfix.BackgroundColor3 = Color3.fromRGB(12,16,42) tbfix.BackgroundTransparency = 0.25 tbfix.BorderSizePixel = 0 tbfix.Parent = tb
+		local tl = Instance.new('TextLabel')
+		tl.Size = UDim2.new(0,90,1,0) tl.Position = UDim2.new(0,12,0,0)
+		tl.BackgroundTransparency = 1 tl.Text = 'AEROV4 CHAT'
+		tl.TextColor3 = Color3.fromRGB(195,210,255) tl.TextSize = 13 tl.Font = Enum.Font.GothamBold
+		tl.TextXAlignment = Enum.TextXAlignment.Left tl.Parent = tb
+		local nameBox = Instance.new('TextBox')
+		nameBox.Name = 'CustomNameBox' nameBox.Size = UDim2.new(0,128,0,22) nameBox.Position = UDim2.new(0,100,0.5,-11)
+		nameBox.BackgroundColor3 = Color3.fromRGB(18,22,55) nameBox.BackgroundTransparency = 0.35 nameBox.BorderSizePixel = 0
+		nameBox.Text = customChatName nameBox.PlaceholderText = getMyName()
+		nameBox.TextColor3 = Color3.fromRGB(200,220,255) nameBox.PlaceholderColor3 = Color3.fromRGB(90,100,145)
+		nameBox.TextSize = 11 nameBox.Font = Enum.Font.Gotham nameBox.TextXAlignment = Enum.TextXAlignment.Center
+		nameBox.ClearTextOnFocus = false
+		local nbc = Instance.new('UICorner') nbc.CornerRadius = UDim.new(0,7) nbc.Parent = nameBox
+		local nbs = Instance.new('UIStroke') nbs.Color = Color3.fromRGB(80,110,220) nbs.Thickness = 0.8 nbs.Transparency = 0.5 nbs.Parent = nameBox
+		nameBox.Parent = tb
+		nameBox.FocusLost:Connect(function()
+			local v = nameBox.Text:match('^%s*(.-)%s*$') or ''
+			customChatName = v
+			getgenv().aeroChatCustomName = v
+			nameBox.PlaceholderText = getMyName()
+			chatRequest({action='chat_unregister', robloxUserId=getMyId()}, false)
+			task.wait(0.1)
+			local regRes = chatRequest({action='chat_register', robloxUserId=getMyId(), displayName=getMyName()}, false)
+			if regRes and regRes.error then
+				customChatName = '' nameBox.Text = '' nameBox.PlaceholderText = getMyName()
+				local errLbl = Instance.new('TextLabel')
+				errLbl.Size = UDim2.new(1,0,0,16) errLbl.Position = UDim2.new(0,0,1,2)
+				errLbl.BackgroundTransparency = 1 errLbl.Text = '!! Name taken!'
+				errLbl.TextColor3 = Color3.fromRGB(255,90,90) errLbl.TextSize = 10 errLbl.Font = Enum.Font.GothamBold
+				errLbl.ZIndex = 10 errLbl.Parent = nameBox
+				task.delay(2.5, function() if errLbl and errLbl.Parent then errLbl:Destroy() end end)
+			end
+		end)
+		local hb = Instance.new('TextButton')
+		hb.Size = UDim2.new(0,24,0,20) hb.Position = UDim2.new(1,-28,0.5,-10)
+		hb.BackgroundColor3 = Color3.fromRGB(55,65,120) hb.BackgroundTransparency = 0.45 hb.BorderSizePixel = 0
+		hb.Text = '—' hb.TextColor3 = Color3.fromRGB(200,210,255) hb.TextSize = 11 hb.Font = Enum.Font.GothamBold
+		local hbc = Instance.new('UICorner') hbc.CornerRadius = UDim.new(0,6) hbc.Parent = hb hb.Parent = tb
+		local sf = Instance.new('ScrollingFrame')
+		sf.Name = 'Messages' sf.Size = UDim2.new(1,-10,1,-128)
+		sf.Position = UDim2.new(0,5,0,40) sf.BackgroundTransparency = 1
+		sf.BorderSizePixel = 0 sf.ScrollBarThickness = 3
+		sf.ScrollBarImageColor3 = Color3.fromRGB(90,115,220)
+		sf.CanvasSize = UDim2.new(0,0,0,0) sf.AutomaticCanvasSize = Enum.AutomaticSize.Y sf.Parent = frame
+		local ll = Instance.new('UIListLayout')
+		ll.Padding = UDim.new(0,2) ll.SortOrder = Enum.SortOrder.LayoutOrder ll.Parent = sf
+		local sp = Instance.new('UIPadding')
+		sp.PaddingTop = UDim.new(0,4) sp.PaddingLeft = UDim.new(0,3) sp.PaddingRight = UDim.new(0,3) sp.Parent = sf
+		local rb = Instance.new('Frame')
+		rb.Name = 'ReplyBanner' rb.Size = UDim2.new(1,-10,0,26) rb.Position = UDim2.new(0,5,1,-86)
+		rb.BackgroundColor3 = Color3.fromRGB(25,32,75) rb.BackgroundTransparency = 0.25
+		rb.BorderSizePixel = 0 rb.Visible = false rb.ZIndex = 5
+		local rbc2 = Instance.new('UICorner') rbc2.CornerRadius = UDim.new(0,8) rbc2.Parent = rb
+		local rbs = Instance.new('UIStroke') rbs.Color = Color3.fromRGB(90,120,220) rbs.Thickness = 0.8 rbs.Transparency = 0.5 rbs.Parent = rb
+		local rbl = Instance.new('TextLabel')
+		rbl.Name = 'ReplyLabel' rbl.Size = UDim2.new(1,-28,1,0) rbl.Position = UDim2.new(0,8,0,0)
+		rbl.BackgroundTransparency = 1 rbl.Text = '↩ replying to...'
+		rbl.TextColor3 = Color3.fromRGB(150,175,255) rbl.TextSize = 10 rbl.Font = Enum.Font.Gotham
+		rbl.TextXAlignment = Enum.TextXAlignment.Left rbl.TextTruncate = Enum.TextTruncate.AtEnd rbl.Parent = rb
+		local rxb = Instance.new('TextButton')
+		rxb.Size = UDim2.new(0,22,1,0) rxb.Position = UDim2.new(1,-22,0,0)
+		rxb.BackgroundTransparency = 1 rxb.Text = 'X'
+		rxb.TextColor3 = Color3.fromRGB(220,90,90) rxb.TextSize = 11 rxb.Font = Enum.Font.GothamBold rxb.Parent = rb
+		rxb.MouseButton1Click:Connect(clearReply)
+		rb.Parent = frame
+		replyBanner = rb
+		local ia = Instance.new('Frame')
+		ia.Size = UDim2.new(1,-10,0,44) ia.Position = UDim2.new(0,5,1,-52)
+		ia.BackgroundColor3 = Color3.fromRGB(12,17,48) ia.BackgroundTransparency = 0.25 ia.BorderSizePixel = 0
+		local iac = Instance.new('UICorner') iac.CornerRadius = UDim.new(0,14) iac.Parent = ia
+		local ias = Instance.new('UIStroke') ias.Color = Color3.fromRGB(70,100,210) ias.Thickness = 0.8 ias.Transparency = 0.45 ias.Parent = ia
+		ia.Parent = frame
+		local ib = Instance.new('TextBox')
+		ib.Name = 'ChatInput' ib.Size = UDim2.new(1,-58,1,-14) ib.Position = UDim2.new(0,8,0,7)
+		ib.BackgroundColor3 = Color3.fromRGB(255,255,255) ib.BackgroundTransparency = 0.93 ib.BorderSizePixel = 0
+		ib.Text = '' ib.PlaceholderText = 'Message...'
+		ib.TextColor3 = Color3.fromRGB(225,232,255) ib.PlaceholderColor3 = Color3.fromRGB(85,95,140)
+		ib.TextSize = 12 ib.Font = Enum.Font.Gotham ib.TextXAlignment = Enum.TextXAlignment.Left ib.ClearTextOnFocus = false
+		local ibc = Instance.new('UICorner') ibc.CornerRadius = UDim.new(0,9) ibc.Parent = ib
+		local ibp = Instance.new('UIPadding') ibp.PaddingLeft = UDim.new(0,7) ibp.Parent = ib
+		ib.Parent = ia
+		local sb = Instance.new('TextButton')
+		sb.Name = 'SendBtn' sb.Size = UDim2.new(0,42,1,-14) sb.Position = UDim2.new(1,-48,0,7)
+		sb.BackgroundColor3 = Color3.fromRGB(75,135,255) sb.BackgroundTransparency = 0.08 sb.BorderSizePixel = 0
+		sb.Text = '>>' sb.TextColor3 = Color3.fromRGB(255,255,255) sb.TextSize = 12 sb.Font = Enum.Font.GothamBold
+		local sbc = Instance.new('UICorner') sbc.CornerRadius = UDim.new(0,9) sbc.Parent = sb sb.Parent = ia
+		chatInputBox = ib chatSendBtn = sb
+		sb.MouseButton1Click:Connect(sendCurrentMessage)
+		ib.FocusLost:Connect(function(enter) if enter then sendCurrentMessage() end end)
+		hb.MouseButton1Click:Connect(function()
+			local vis = not sf.Visible
+			sf.Visible = vis ia.Visible = vis
+			if not vis then rb.Visible = false end
+			frame.Size = vis and UDim2.new(0,360,0,450) or UDim2.new(0,360,0,36)
+		end)
+		sg.Parent = coreGui
+		chatGui = sg msgScroll = sf
+	end
+
+	local function startPolling()
+		if pollThread then task.cancel(pollThread) pollThread = nil end
+		pollThread = task.spawn(function()
+			while true do
+				pcall(function()
+					local data = chatRequest({action='chat_poll', robloxUserId=getMyId(), since=lastTime}, false)
+					if data and data.messages then
+						for _, msg in ipairs(data.messages) do
+							if msg.timestamp > lastTime then lastTime = msg.timestamp end
+							addMessageUI(msg)
+						end
+					end
+				end)
+				task.wait(2)
+			end
+		end)
+	end
+
+	vape.Categories.Utility:CreateModule({
+		Name = 'AeroV4Chat',
+		Tooltip = 'Chat with other AeroV4 users across servers',
+		Function = function(enabled)
+			if enabled then
+				chatRequest({action='chat_register', robloxUserId=getMyId(), displayName=getMyName()}, false)
+				buildGui()
+				startPolling()
+			else
+				chatRequest({action='chat_unregister', robloxUserId=getMyId()}, false)
+				if pollThread then task.cancel(pollThread) pollThread = nil end
+				if chatGui then pcall(function() chatGui:Destroy() end) chatGui = nil end
+				msgScroll = nil chatInputBox = nil chatSendBtn = nil
+				messageFrames = {} lastTime = 0 editingId = nil
+			end
 		end
 	})
 end)
