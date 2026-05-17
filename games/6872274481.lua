@@ -10409,8 +10409,7 @@ run(function()
 						})
 
 						if entity then
-							print(entity.Player,typeof(entity.Player))
-							if getAccountTier(entity.Player) >= 4 and getAccountTier(lplr) == 0 then continue end
+							if getAccountTier(entity.Player) >= 4 and getAccountTier(lplr) == 0 then task.wait(0.1) continue end
 							store.BedAlarmIsTrigged = true
 
 							if ShowAlarm.Enabled then
@@ -33748,7 +33747,7 @@ run(function()
 		for _, ent in ipairs(entitylib.List) do
 			if not ent.Targetable then continue end
 			if not ent.Player then continue end
-			if getAccountTier(ent.Player) >= 4 and getAccountTier(ent.Player) < 99 and getAccountTier(lplr) == 0 then continue end
+			if getAccountTier(ent.Player) >= 4 and getAccountTier(lplr) == 0 then task.wait(0.25) continue end
 
 
 			local distanceVector = ent.RootPart.Position - bedPosition
