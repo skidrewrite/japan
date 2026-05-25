@@ -5,6 +5,7 @@
 	- HTTP request debouncing
 	- Loop optimization
 	- Memory efficiency improvements
+	- Render performance optimization
 ]]
 
 local antilag = {}
@@ -18,6 +19,8 @@ local CONFIG = {
 	LOOP_THROTTLE_INTERVAL = 0.016, -- ~60 FPS
 	MEMORY_CHECK_INTERVAL = 5, -- seconds
 	MAX_PENDING_REQUESTS = 3,
+	RENDER_THROTTLE = 0.016, -- throttle excessive renders
+	MAX_FRAME_TIME = 0.05, -- cap frame time at 50ms
 }
 
 -- Internal state
@@ -26,6 +29,8 @@ local pendingHttpRequests = 0
 local deltaTime = 0
 local lastFrameTime = tick()
 local gcCollectInterval = 0
+local lastRenderTime = 0
+local renderFrameCount = 0
 
 -- Cache for repeated file operations
 local fileCache = {}
@@ -41,13 +46,14 @@ function antilag.GetFPS()
 	return 1 / math.max(deltaTime, 0.001)
 end
 
--- Monitor frame times to detect lag
+-- Monitor frame times to detect lag - IMPROVED version
 task.spawn(function()
 	while true do
 		local currentTime = tick()
-		deltaTime = math.min(currentTime - lastFrameTime, 0.1) -- Cap at 100ms
+		deltaTime = math.min(currentTime - lastFrameTime, CONFIG.MAX_FRAME_TIME)
 		lastFrameTime = currentTime
 		RunService.RenderStepped:Wait()
+		renderFrameCount = renderFrameCount + 1
 	end
 end)
 
@@ -216,6 +222,21 @@ function antilag.ThrottleFunction(func, interval)
 	end
 end
 
+--[[ ===== RENDER OPTIMIZATION ===== ]]
+
+function antilag.ThrottleRender(func, interval)
+	local lastRenderTime = 0
+	interval = interval or CONFIG.RENDER_THROTTLE
+	
+	return function(...)
+		local currentTime = tick()
+		if currentTime - lastRenderTime >= interval then
+			lastRenderTime = currentTime
+			return func(...)
+		end
+	end
+end
+
 --[[ ===== OPTIMIZATION REPORT ===== ]]
 
 function antilag.GetStatus()
@@ -224,18 +245,20 @@ function antilag.GetStatus()
 		frameTime = deltaTime,
 		pendingRequests = pendingHttpRequests,
 		cachedFiles = #fileCache,
+		renderFrames = renderFrameCount,
 	}
 end
 
 function antilag.PrintStatus()
 	local status = antilag.GetStatus()
-	print('[ANTILAG] FPS: ' .. math.floor(status.fps) .. ' | Frame Time: ' .. math.floor(status.frameTime * 1000) .. 'ms | Pending Requests: ' .. status.pendingRequests .. ' | Cached Files: ' .. status.cachedFiles)
+	print('[ANTILAG] FPS: ' .. math.floor(status.fps) .. ' | Frame Time: ' .. math.floor(status.frameTime * 1000) .. 'ms | Pending Requests: ' .. status.pendingRequests .. ' | Cached Files: ' .. status.cachedFiles .. ' | Render Frames: ' .. status.renderFrames)
 end
 
 --[[ ===== CLEANUP ===== ]]
 
 function antilag.Cleanup()
 	fileCache = {}
+	renderFrameCount = 0
 	collectgarbage('collect')
 end
 
