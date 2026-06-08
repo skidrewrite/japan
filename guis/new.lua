@@ -4881,6 +4881,66 @@ function mainapi:CreateCategory(categorysettings)
 	windowlist.Parent = children
 
 	function categoryapi:CreateModule(modulesettings)
+		local function createDuplicateOption(optionsettings)
+			optionsettings = optionsettings or {}
+			local optionapi = {
+				Enabled = optionsettings.Default or false,
+				Value = optionsettings.DefaultValue or optionsettings.Value or optionsettings.Default or (optionsettings.List and optionsettings.List[1]) or 1,
+				ValueMin = optionsettings.DefaultMin or optionsettings.Min or 0,
+				ValueMax = optionsettings.DefaultMax or optionsettings.Max or 0,
+				Hue = optionsettings.DefaultHue or 0.44,
+				Sat = optionsettings.DefaultSat or 1,
+				ValueColor = optionsettings.DefaultValue or 1,
+				Opacity = optionsettings.DefaultOpacity or 1,
+				List = optionsettings.List or {},
+				ListEnabled = {},
+				Object = {Visible = optionsettings.Visible ~= false}
+			}
+			optionapi.GetRandomValue = function(self)
+				return self.ValueMax > self.ValueMin and (self.ValueMin + ((self.ValueMax - self.ValueMin) / 2)) or self.Value
+			end
+			optionapi.Load = function() end
+			return optionapi
+		end
+
+		local function createDuplicateModule()
+			local moduleapi = {
+				Enabled = false,
+				Options = {},
+				Bind = {},
+				Index = getTableSize(mainapi.Modules),
+				ExtraText = modulesettings.ExtraText,
+				Name = modulesettings.Name,
+				Category = categorysettings.Name,
+				KeybindMode = 'Toggle',
+				HoldCount = 0,
+				Duplicate = true
+			}
+			function moduleapi:Toggle() end
+			function moduleapi:Clean() end
+			function moduleapi:CreateTargets(targets)
+				local optionapi = {Object = {Visible = true}}
+				for i, v in targets or {} do
+					optionapi[i] = {Enabled = v}
+				end
+				return optionapi
+			end
+			for _, name in {'CreateToggle', 'CreateSlider', 'CreateTwoSlider', 'CreateDropdown', 'CreateTextBox', 'CreateTextList', 'CreateColorSlider'} do
+				moduleapi[name] = function(_, optionsettings)
+					return createDuplicateOption(optionsettings)
+				end
+			end
+			return moduleapi
+		end
+
+		mainapi.DuplicateModuleAliases = mainapi.DuplicateModuleAliases or {}
+		local modulekey = tostring(modulesettings.Name):lower():gsub('[^%w]', '')
+		local existing = mainapi.DuplicateModuleAliases[modulekey]
+		if existing and existing ~= modulesettings.Name and mainapi.Modules[existing] then
+			return createDuplicateModule()
+		end
+
+		mainapi.DuplicateModuleAliases[modulekey] = modulesettings.Name
 		mainapi:Remove(modulesettings.Name)
 		if mainapi.ThreadFix then
 			setthreadidentity(8)
