@@ -5380,11 +5380,29 @@ run(function()
 	local math_max = math.max
 	local lockedRandomPart = nil
 	local wasHovering = false
+	local velocityHistory = {}
+	local VELOCITY_HISTORY_SIZE = 2
+	local solveCache = {}
+	local SOLVE_CACHE_TTL = 0.05
+	local smoothedTargetPos = {}
 	local PAFOVCircle
 	local ProjectileAimbot
 	local paFOVCircleDrawing = nil
 	local AutoCharge
 	local paFOVCircleConnection = nil
+	local function getSmoothedVelocity(entity)
+		local id = tostring(entity)
+		local root = entity.RootPart
+		if not root then return Vector3.zero end
+		local rawVel = root.AssemblyLinearVelocity or root.Velocity or Vector3.zero
+		if not velocityHistory[id] then
+			velocityHistory[id] = rawVel
+		else
+			velocityHistory[id] = velocityHistory[id]:Lerp(rawVel, 0.35)
+		end
+		return velocityHistory[id]
+	end
+
 	local function runPAFOVCircle(call)
 		if paFOVCircleConnection then
 			paFOVCircleConnection:Disconnect()
@@ -5393,23 +5411,22 @@ run(function()
 		if paFOVCircleDrawing then
 			paFOVCircleDrawing:Remove()
 			paFOVCircleDrawing = nil
-			end
-			if call then
-				paFOVCircleDrawing = Drawing.new('Circle')
-				paFOVCircleDrawing.Visible = false
-				paFOVCircleDrawing.Thickness = 1
-				paFOVCircleDrawing.Color = Color3.fromRGB(255, 255, 255)
-				paFOVCircleDrawing.Filled = false
-				paFOVCircleDrawing.NumSides = 64
-				local fovElapsed = 0
-				paFOVCircleConnection = runService.RenderStepped:Connect(function(dt)
-					fovElapsed += dt
-					if not shouldRunRenderLoop(fovElapsed, dt) then return end
-					fovElapsed = 0
-					if paFOVCircleDrawing and FOV and FOV.Value then
-						local shouldShow = false
-						if PAFOVCircle and PAFOVCircle.Enabled and ProjectileAimbot and ProjectileAimbot.Enabled then
-							local tool = store.hand and store.hand.tool
+		end
+		if call then
+			paFOVCircleDrawing = Drawing.new('Circle')
+			paFOVCircleDrawing.Visible = false
+			paFOVCircleDrawing.Thickness = 1
+			paFOVCircleDrawing.Color = Color3.fromRGB(255, 255, 255)
+			paFOVCircleDrawing.Filled = false
+			paFOVCircleDrawing.NumSides = 64
+			local _paFOVThrottler = getgenv().VapePerf.throttle('pa_fov_circle', 60) -- 60 FPS max
+			paFOVCircleConnection = runService.RenderStepped:Connect(function()
+				if not _paFOVThrottler:shouldRun() then return end
+				
+				if paFOVCircleDrawing and FOV and FOV.Value then
+					local shouldShow = false
+					if PAFOVCircle and PAFOVCircle.Enabled and ProjectileAimbot and ProjectileAimbot.Enabled then
+						local tool = store.hand and store.hand.tool
 						local itemType = tool and tool.Name or ""
 						local itemMeta = bedwars.ItemMeta and bedwars.ItemMeta[itemType]
 						if itemMeta and itemMeta.projectileSource then
@@ -5494,61 +5511,65 @@ run(function()
 		return false
 	end
 
-    local function getValidTargets(originPos, maxDist, maxAngle, sortMethod)
-        local valid = {}
-        local fovThreshold = math_cos(math_rad(maxAngle) / 2)
-        local rangeSq = maxDist * maxDist
+	local function getValidTargets(originPos, maxDist, maxAngle, sortMethod)
+		local valid = {}
+		local fovThreshold = math_cos(math_rad(maxAngle) / 2)
+		local rangeSq = maxDist * maxDist
 
-        for _, ent in ipairs(entitylib.List) do
-            if not Targets.Players.Enabled and ent.Player then continue end
-            if (not Targets.NPCs or not Targets.NPCs.Enabled) and ent.NPC then continue end
-            if not ent.Targetable then continue end
-			if ent.Player and getAccountTier(ent.Player) >= 1 and getAccountTier(lplr) == 0 then continue end
-            if not ent.Character or not ent.RootPart or not ent.RootPart.Parent then continue end
+		for _, ent in ipairs(entitylib.List) do
+			if not Targets.Players.Enabled and ent.Player then continue end
+			if (not Targets.NPCs or not Targets.NPCs.Enabled) and ent.NPC then continue end
+			if not ent.Targetable then continue end
 
-            local delta = ent.RootPart.Position - originPos
-            local distSq = delta.X*delta.X + delta.Y*delta.Y + delta.Z*delta.Z
-            if distSq > rangeSq then continue end
+			if not ent.Character or not ent.RootPart or not ent.RootPart.Parent then continue end
 
-            if maxAngle < 360 then
-                local facing = gameCamera.CFrame.LookVector
-                if delta.Magnitude > 0.001 then
-                    local dot = facing:Dot(delta.Unit)
-                    if dot < fovThreshold then continue end
-                end
-            end
+			local delta = ent.RootPart.Position - originPos
+			local distSq = delta.X*delta.X + delta.Y*delta.Y + delta.Z*delta.Z
+			if distSq > rangeSq then continue end
 
-            if Targets.Walls.Enabled then
-                local ray = workspace:Raycast(originPos, delta, rayCheck)
-                if ray then continue end
-            end
+			if maxAngle < 360 then
+				local facing = gameCamera.CFrame.LookVector
+				if delta.Magnitude > 0.001 then
+					local dot = facing:Dot(delta.Unit)
+					if dot < fovThreshold then continue end
+				end
+			end
 
-            if sortMethod == "Cursor" then
-                local mousePos = inputService:GetMouseLocation()
-                local screenPos, onScreen = gameCamera:WorldToScreenPoint(ent.RootPart.Position)
-                if not onScreen then continue end
-                local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                if screenDist > FOV.Value then continue end
-            end
+			if Targets.Walls.Enabled then
+				local ray = workspace:Raycast(originPos, delta, rayCheck)
+				if ray then continue end
+			end
 
-            table.insert(valid, {Entity = ent})
-        end
+			if sortMethod == "Cursor" then
+				local mousePos = inputService:GetMouseLocation()
+				local screenPos, onScreen = gameCamera:WorldToScreenPoint(ent.RootPart.Position)
+				if not onScreen then continue end
+				local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+				if screenDist > FOV.Value then continue end
+			end
 
-        if #valid == 0 then return {} end
+			table.insert(valid, {Entity = ent})
+		end
 
-        local sortFunc = sortmethods[sortMethod] or sortmethods.Distance
-        table.sort(valid, sortFunc)
-        local unwrapped = {}
-        for _, v in ipairs(valid) do
-            table.insert(unwrapped, v.Entity)
-        end
-        return unwrapped
-    end
+		if #valid == 0 then return {} end
+
+		local sortFunc = sortmethods[sortMethod] or sortmethods.Distance
+		table.sort(valid, sortFunc)
+		local unwrapped = {}
+		for _, v in ipairs(valid) do
+			table.insert(unwrapped, v.Entity)
+		end
+		return unwrapped
+	end
 
 	local function pickRandomPart(character)
 		local roll = math.random(1, 100)
-		if roll <= RandomHeadPercent.Value then
+		local headChance = RandomHeadPercent.Value
+		local torsoChance = RandomTorsoPercent.Value
+		if roll <= headChance then
 			return character:FindFirstChild('Head') or character:FindFirstChild('HumanoidRootPart')
+		elseif roll <= headChance + torsoChance then
+			return character:FindFirstChild('UpperTorso') or character:FindFirstChild('HumanoidRootPart')
 		else
 			return character:FindFirstChild('HumanoidRootPart')
 		end
@@ -5585,22 +5606,18 @@ run(function()
 		Name = 'ProjectileAimbot',
 		Function = function(callback)
 			if callback then
-						if PAFOVCircle then
-							runPAFOVCircle(PAFOVCircle.Enabled)
-						end
-						if DesirePAHideCursor and DesirePAHideCursor.Enabled and not cursorRenderConnection then
-							local cursorElapsed = 0
-							cursorRenderConnection = runService.RenderStepped:Connect(function(dt)
-								cursorElapsed += dt
-								if cursorElapsed < 0.25 then return end
-								cursorElapsed = 0
-								checkGUIState()
-								updateCursor()
-							end)
-						end
+				if PAFOVCircle then
+					runPAFOVCircle(PAFOVCircle.Enabled)
+				end
+				if DesirePAHideCursor and DesirePAHideCursor.Enabled and not cursorRenderConnection then
+					cursorRenderConnection = runService.RenderStepped:Connect(function()
+						checkGUIState()
+						updateCursor()
+					end)
+				end
 
-					old = bedwars.ProjectileController.calculateImportantLaunchValues
-					bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
+				old = bedwars.ProjectileController.calculateImportantLaunchValues
+				bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
 					local self, projmeta, worldmeta, origin, shootpos = ...
 					local originPos = entitylib.isAlive and (shootpos or (entitylib.character and entitylib.character.RootPart and entitylib.character.RootPart.Position)) or Vector3.zero
 					if not wasHovering then lockedRandomPart = nil end
@@ -5640,7 +5657,7 @@ run(function()
 					elseif TargetPart.Value == 'RootPart' then
 						targetBodyPart = plr.RootPart
 					elseif TargetPart.Value == 'Head' then
-						targetBodyPart = plr.Head or plr.RootPart
+						targetBodyPart = (plr.Character and plr.Character:FindFirstChild('Head')) or plr.RootPart
 					elseif TargetPart.Value == 'Closest' then
 						local mousePos = inputService:GetMouseLocation()
 						targetBodyPart = getClosestPart(plr.Character, mousePos)
@@ -5678,11 +5695,14 @@ run(function()
 
 					local meta = projmeta:getProjectileMeta()
 					local lifetime = (worldmeta and meta.predictionLifetimeSec or meta.lifetimeSec or 3)
-					local gravity = (meta.gravitationalAcceleration or 196.2) * projmeta.gravityMultiplier
+					local gravityMultiplier = projmeta.gravityMultiplier or 1
+					if gravityMultiplier == 0 then gravityMultiplier = 1 end
+					local gravity = (meta.gravitationalAcceleration or 196.2) * gravityMultiplier
 					local projSpeed = (meta.launchVelocity or 100)
-					local offsetpos = pos + (projmeta.projectile == 'owl_projectile' and Vector3.zero or projmeta.fromPositionOffset)
+					local safeOffset = (projmeta.projectile == 'owl_projectile') and Vector3.zero or (projmeta.fromPositionOffset or Vector3.zero)
+					local offsetpos = pos + safeOffset
 					local balloons = plr.Character and plr.Character:GetAttribute('InflatedBalloons')
-					local playerGravity = workspace.Gravity
+					local playerGravity = 0
 					if balloons and balloons > 0 then
 						playerGravity = workspace.Gravity * (1 - (balloons >= 4 and 1.2 or balloons >= 3 and 1 or 0.975))
 					end
@@ -5698,29 +5718,73 @@ run(function()
 						end
 					end
 
-					local targetVelocity = targetBodyPart.Velocity
-					if CustomPrediction and CustomPrediction.Enabled then
-						local hMult = (HorizontalMultiplier and HorizontalMultiplier.Value or 100) / 100
-						local vMult = (VerticalMultiplier and VerticalMultiplier.Value or 100) / 100
-						targetVelocity = Vector3.new(
-							targetVelocity.X * hMult,
-							targetVelocity.Y * vMult,
-							targetVelocity.Z * hMult
-						)
-					end
 					local bowRelX = bedwars.BowConstantsTable.RelX or 0
 					local bowRelY = bedwars.BowConstantsTable.RelY or 0
 					local bowRelZ = bedwars.BowConstantsTable.RelZ or 0
-					local newlook = CFrame.new(offsetpos, targetBodyPart.Position) *
+					local aimTarget = targetBodyPart.Position
+					local rootVelocity = getSmoothedVelocity(plr)
+
+					local newlook = CFrame.new(offsetpos, aimTarget) *
 						CFrame.new(projmeta.projectile == 'owl_projectile' and Vector3.zero or
 							Vector3.new(bowRelX, bowRelY, bowRelZ))
 
-					local calc = prediction.SolveTrajectory(
-						newlook.p, projSpeed, gravity,
-						targetBodyPart.Position,
-						projmeta.projectile == 'telepearl' and Vector3.zero or targetVelocity,
-						playerGravity, plr.HipHeight, plr.Jumping and 42.6 or nil, rayCheck
-					)
+					local dist = (aimTarget - newlook.p).Magnitude
+					local networkLead = math.clamp(0.07 + dist * 0.0008, 0.07, 0.18)
+					local calcKey = tostring(plr)
+					smoothedTargetPos[calcKey] = aimTarget
+					local solverVelocity = projmeta.projectile == 'telepearl' and Vector3.zero or rootVelocity
+					if rootVelocity.Magnitude > 0.5 then
+						local horzVel = Vector3.new(rootVelocity.X, 0, rootVelocity.Z)
+						aimTarget = aimTarget + horzVel * networkLead
+					end
+					if CustomPrediction and CustomPrediction.Enabled then
+						local hMult = (HorizontalMultiplier and HorizontalMultiplier.Value or 100) / 100
+						local vMult = (VerticalMultiplier and VerticalMultiplier.Value or 100) / 100
+						solverVelocity = Vector3.new(
+							solverVelocity.X * hMult,
+							solverVelocity.Y * vMult,
+							solverVelocity.Z * hMult
+						)
+					end
+
+					local targetRoot = plr.RootPart
+					if targetRoot then
+						local targetRootVel = targetRoot.AssemblyLinearVelocity or targetRoot.Velocity or Vector3.zero
+						local targetMovingUp = targetRootVel.Y > 3
+						local heightDiff = aimTarget.Y - newlook.p.Y
+						if targetMovingUp then
+							aimTarget = aimTarget + Vector3.new(0, math.clamp(targetRootVel.Y * 0.08, 0.5, 3.5), 0)
+						elseif heightDiff < -8 then
+							aimTarget = aimTarget + Vector3.new(0, math.clamp(math.abs(heightDiff) * 0.04, 0.3, 2.5), 0)
+						end
+					end
+
+					local cacheKey = tostring(plr) .. projmeta.projectile
+					local cached = solveCache[cacheKey]
+					local now = tick()
+					local calc
+					if cached and (now - cached.t) < SOLVE_CACHE_TTL and (cached.pos - aimTarget).Magnitude < 0.8 then
+						calc = cached.result
+					else
+						local rootVel = plr.RootPart and (plr.RootPart.AssemblyLinearVelocity or plr.RootPart.Velocity) or Vector3.zero
+						local verticalVel = rootVel.Y
+						local isMovingUp = verticalVel > 4
+						local jumpOverride = nil
+						if isMovingUp then
+							jumpOverride = verticalVel * 0.85
+						elseif plr.Jumping then
+							jumpOverride = 38
+						end
+						calc = prediction.SolveTrajectory(
+							newlook.p, projSpeed, gravity,
+							aimTarget,
+							solverVelocity,
+							playerGravity, plr.HipHeight, jumpOverride, rayCheck
+						)
+						if calc then
+							solveCache[cacheKey] = {t = now, pos = aimTarget, result = calc}
+						end
+					end
 
 					if calc then
 						if targetinfo and targetinfo.Targets then
@@ -5732,15 +5796,11 @@ run(function()
 							if projmeta.projectile:find('arrow') then
 								customDrawDuration = 0.58 * (AeroPAChargePercent.Value / 100)
 							elseif projmeta.projectile:find('frosty_snowball') then
-								local tool = store.hand and store.hand.tool
-								if tool and tool.Name:find('frost_staff') then
-									local cd = (tool.Name:find('frost_staff_3') and 0.16) or
-											(tool.Name:find('frost_staff_2') and 0.18) or 0.2
-									customDrawDuration = cd * (AeroPAChargePercent.Value / 100)
-								end
+								local chargeTime = projmeta.maxDrawDurationSeconds or meta.maxDrawDurationSeconds or 0.8
+								customDrawDuration = chargeTime * (AeroPAChargePercent.Value / 100)
 							end
 						else
-							    customDrawDuration = 0.05
+							customDrawDuration = 0.05
 						end
 
 						wasHovering = false
@@ -5760,6 +5820,9 @@ run(function()
 				bedwars.ProjectileController.calculateImportantLaunchValues = old
 				wasHovering = false
 				lockedRandomPart = nil
+				table.clear(velocityHistory)
+				table.clear(solveCache)
+				table.clear(smoothedTargetPos)
 				if cursorRenderConnection then
 					cursorRenderConnection:Disconnect()
 					cursorRenderConnection = nil
@@ -5814,8 +5877,6 @@ run(function()
 		Tooltip = 'Maximum distance (in studs) for targeting'
 	})
 
-
-
 	FOV = ProjectileAimbot:CreateSlider({
 		Name = 'FOV',
 		Min = 1,
@@ -5868,20 +5929,16 @@ run(function()
 		Function = function(callback)
 			if DesirePACursorViewMode then DesirePACursorViewMode.Object.Visible = callback end
 			if DesirePACursorLimitBow then DesirePACursorLimitBow.Object.Visible = callback end
-				if DesirePACursorShowGUI then DesirePACursorShowGUI.Object.Visible = callback end
-				if callback and ProjectileAimbot.Enabled then
-					if not cursorRenderConnection then
-						local cursorElapsed = 0
-						cursorRenderConnection = runService.RenderStepped:Connect(function(dt)
-							cursorElapsed += dt
-							if cursorElapsed < 0.25 then return end
-							cursorElapsed = 0
-							checkGUIState()
-							updateCursor()
-						end)
-					end
-					updateCursor()
-				else
+			if DesirePACursorShowGUI then DesirePACursorShowGUI.Object.Visible = callback end
+			if callback and ProjectileAimbot.Enabled then
+				if not cursorRenderConnection then
+					cursorRenderConnection = runService.RenderStepped:Connect(function()
+						checkGUIState()
+						updateCursor()
+					end)
+				end
+				updateCursor()
+			else
 				if cursorRenderConnection then
 					cursorRenderConnection:Disconnect()
 					cursorRenderConnection = nil
