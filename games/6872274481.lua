@@ -44998,3 +44998,55 @@ run(function()
 		end
 	})
 end)
+
+run(function()
+	local AutoXP;
+
+	AutoXP = vape.Categories.Utility:CreateModule({
+		Name = 'AutoXP',
+		Function = function(callback)
+			if callback then
+				repeat task.wait(1) until bedwars.Knit.Controllers.MatchController:getMatchState() == 1
+
+				local chests = {}
+				for _, value in workspace:GetChildren() do
+					if value.Name == 'chest' then
+						table.insert(chests, value)
+					end
+				end
+
+				AutoXP:Clean(workspace.ChildAdded:Connect(function(child)
+					if child.Name == 'chest' then
+						table.insert(chests, child)
+					end
+				end))
+
+				local nearestChest = (function()
+					local nearest, dist = nil, math.huge
+					for index, value in chests do
+						if lplr:DistanceFromCharacter(value.Position) < dist then
+							dist = lplr:DistanceFromCharacter(value.Position)
+							nearest = value
+						end
+					end
+
+					return nearest
+				end)()
+
+				tweenService:Create(entitylib.character.RootPart, TweenInfo.new(0.5), {
+					CFrame = nearestChest and nearestChest.CFrame + Vector3.new(0, 5, 0) or entitylib.character.RootPart.CFrame
+				}):Play()
+				local start = tick()
+
+				repeat task.wait(2)
+					mouse1click()
+				until (tick() - start) > 30 or not AutoXP.Enabled
+
+				if AutoXP.Enabled then
+					Client:Get('ResetCharacter'):SendToServer()
+					bedwars.QueueController:joinQueue(store.queueType)
+				end
+			end
+		end
+	})
+end)
