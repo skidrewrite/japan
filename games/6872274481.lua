@@ -35226,11 +35226,11 @@ run(function()
 	local MaxRange = 0
 	local CE = false
 	if role ~= "owner" and role ~= "coowner" and role ~= "admin" and role ~= "friend" and role ~= "premium" and role ~= "user"  then
-		MaxRange = 12
+		MaxRange = 20
 		CE = false
 		SyncHit = {Enabled = false}
 	elseif role == "user" then
-		MaxRange = 16
+		MaxRange = 20
 		CE = false
 		SyncHit = Killaura:CreateToggle({
 			Name = 'Sync Hit-Time',
@@ -35238,7 +35238,7 @@ run(function()
 			Default = false,
 		})
 	elseif role == "premium" then
-		MaxRange = 17
+		MaxRange = 20
 		CE = true
 		SyncHit = Killaura:CreateToggle({
 			Name = 'Sync Hit-Time',
@@ -35254,7 +35254,7 @@ run(function()
 			Default = false,
 		})
 	else
-		MaxRange = 12
+		MaxRange = 20
 		SyncHit = {Enabled = false}
 	end
 
