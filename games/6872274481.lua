@@ -12278,8 +12278,32 @@ run(function()
 		return val
 	end
 
-	local function isPathBlockedByWalls(bedPos, playerPos)
-		-- Raycast from player towards bed to check if walls block the way
+	local function isBedHallowed(bedBlock)
+		-- Check if bed has holes/gaps by testing blocks around it
+		if not bedBlock then return false end
+		
+		local bedPos = bedBlock.Position / 3
+		local checkPositions = {
+			bedPos + Vector3.new(3, 0, 0),
+			bedPos + Vector3.new(-3, 0, 0),
+			bedPos + Vector3.new(0, 0, 3),
+			bedPos + Vector3.new(0, 0, -3),
+		}
+		
+		local emptyCount = 0
+		for _, pos in checkPositions do
+			local block = getPlacedBlock(pos)
+			if not block then
+				emptyCount += 1
+			end
+		end
+		
+		-- If 2 or more sides are open/empty, bed is hallowed
+		return emptyCount >= 2
+	end
+
+	local function hasWallInFront(playerPos, bedPos)
+		-- Check if there's a wall between player and bed
 		local direction = (bedPos - playerPos)
 		local distance = direction.Magnitude
 		
@@ -12289,7 +12313,6 @@ run(function()
 		raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
 		raycastParams.FilterDescendantsInstances = {entitylib.character}
 		
-		-- Raycast from player to bed
 		local rayResult = workspace:Raycast(playerPos, direction.Unit * distance, raycastParams)
 		
 		if rayResult then
@@ -12298,15 +12321,14 @@ run(function()
 				local hitDistance = (rayResult.Position - playerPos).Magnitude
 				local targetDistance = distance
 				
-				-- If we hit something significantly before reaching the bed, path is blocked
-				-- Allow 3 studs tolerance for bed structure
+				-- If we hit something more than 3 studs before the bed, there's a wall
 				if hitDistance < targetDistance - 3 then
-					return true  -- Wall is blocking
+					return true
 				end
 			end
 		end
 		
-		return false  -- No walls blocking
+		return false
 	end
 
 	local function passesChecks(v)
@@ -12553,20 +12575,20 @@ run(function()
 					
 						if best then
 							if not MouseDown or not MouseDown.Enabled or inputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-								-- Check if walls are blocking the path to bed
-								local isBlocked = isPathBlockedByWalls(best.Position, localPosition)
+								-- Check if bed is hallowed and if there's a wall in front
+								local bedIsHallowed = isBedHallowed(best)
+								local wallInFront = hasWallInFront(localPosition, best.Position)
 								
-								if isBlocked then
-									-- Walls are blocking, try to break path blocks first
+								-- If bed is hallowed and there's a wall, break the wall first
+								if bedIsHallowed and wallInFront then
 									local pathBlock = findPathBlock(best.Position, localPosition)
 									if pathBlock then
 										doBreak(pathBlock, true)
 									else
-										-- No path blocks found, wait
 										task.wait(BreakSpeed.Value)
 									end
 								else
-									-- Path is clear, break the bed directly
+									-- Either bed isn't hallowed or no wall in front, break bed directly
 									doBreak(best, false)
 								end
 								continue
