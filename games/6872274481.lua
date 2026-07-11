@@ -12241,6 +12241,8 @@ local function safeIsBreakable(pos)
     return ok and result
 end
 
+-- Full modified breaker module with WallCheck (raycast line-of-sight) integrated
+
 run(function()
 	local Breaker
 	local Range
@@ -12280,6 +12282,13 @@ run(function()
 	local cachedTeammatesTime = 0
 	local breakabilityCache = {}
 	local BREAK_CACHE_TTL = 0.5
+
+	-- Sight cache for line-of-sight checks
+	local sightCache = {}
+	local SIGHT_CACHE_TTL = 0.25
+
+	-- WallCheck toggle (declared here so helper functions can reference it)
+	local WallCheck
 
 	local function cachedIsBreakable(v)
 		local now = tick()
@@ -12600,6 +12609,7 @@ run(function()
 		return frozenBlockPositions[key] == true
 	end
 
+	-- Hook freeze controller (unchanged)
 	local function hookFreezeController()
 		local FreezeCtrl = (bedwars.KnitClient and bedwars.KnitClient.Controllers and bedwars.KnitClient.Controllers.FreezeBlocksController)
 			or (bedwars.Knit and bedwars.Knit.Controllers and bedwars.Knit.Controllers.FreezeBlocksController)
@@ -12656,6 +12666,77 @@ run(function()
 		return bestYeti
 	end
 
+	-- New: line-of-sight test using raycasts with small cache
+	local function hasLineOfSight(part)
+		if not part or not part.Parent then return false end
+
+		local now = tick()
+		local cached = sightCache[part]
+		if cached and (now - cached.t) < SIGHT_CACHE_TTL then
+			return cached.v
+		end
+
+		-- Find an origin (player root part). Prefer entitylib character root if available.
+		local hrp = (entitylib and entitylib.character and entitylib.character.RootPart) or (lplr.Character and (lplr.Character:FindFirstChild('HumanoidRootPart') or lplr.Character:FindFirstChild('HumanoidRootPart')))
+		if not hrp then
+			-- Be permissive if we can't find a root part
+			sightCache[part] = {v = true, t = now}
+			return true
+		end
+
+		-- Build raycast parameters, ignore own character so rays won't immediately hit the player
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Blacklist
+		local ignoreList = {}
+		if lplr and lplr.Character then
+			table.insert(ignoreList, lplr.Character)
+		end
+		-- ignore small helpers that may interfere
+		params.FilterDescendantsInstances = ignoreList
+
+		local origin = hrp.Position + Vector3.new(0, 1.5, 0)
+
+		-- sample target points on the part: center, top center, and four face centers (slightly inset)
+		local size = part.Size
+		local center = part.Position
+		local inset = 0.01
+		local targets = {
+			center,
+			center + Vector3.new(0, size.Y/2 - inset, 0), -- top
+			center + Vector3.new(size.X/2 - inset, 0, 0), -- +X face
+			center + Vector3.new(-size.X/2 + inset, 0, 0), -- -X face
+			center + Vector3.new(0, 0, size.Z/2 - inset), -- +Z face
+			center + Vector3.new(0, 0, -size.Z/2 + inset) -- -Z face
+		}
+
+		local visible = false
+		for _, target in ipairs(targets) do
+			local dir = target - origin
+			if dir.Magnitude <= 0 then
+				visible = true
+				break
+			end
+			local rayResult = workspace:Raycast(origin, dir, params)
+			if not rayResult then
+				-- nothing between origin and target
+				visible = true
+				break
+			else
+				local hitInst = rayResult.Instance
+				-- Consider visible if the ray hit the target part (or a descendant of it)
+				if hitInst == part or hitInst:IsDescendantOf(part) then
+					visible = true
+					break
+				end
+				-- Also treat glass or transparent thin parts as non-blocking? (optional)
+				-- For now we treat any hit not part-owned as blocking.
+			end
+		end
+
+		sightCache[part] = {v = visible, t = now}
+		return visible
+	end
+
 	local function attemptBreak(tab, localPosition, skipBreakCheck)
 		if not tab then return false end
 		if MouseDown and MouseDown.Enabled and not inputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then return false end
@@ -12665,6 +12746,10 @@ run(function()
 			if dist >= Range.Value or dist >= bestDist then continue end
 			if not skipBreakCheck and v.Name ~= 'bed' then
 				if not cachedIsBreakable(v) then continue end
+			end
+			-- New: wall check / line-of-sight
+			if WallCheck and WallCheck.Enabled then
+				if not hasLineOfSight(v) then continue end
 			end
 			if not passesChecks(v) then continue end
 			best = v
@@ -12685,6 +12770,13 @@ run(function()
 				local dist = (v.Position - localPosition).Magnitude
 				if dist < Range.Value and dist < bestDist then
 					if cachedIsBreakable(v) and passesChecks(v) then
+						-- New: wall check
+						if WallCheck and WallCheck.Enabled then
+							if not hasLineOfSight(v) then
+								-- skip blocked ones
+								continue
+							end
+						end
 						if true then
 							best = v
 							bestDist = dist
@@ -12803,6 +12895,10 @@ run(function()
 								if dist >= Range.Value or dist >= bestDist then continue end
 								if not skip and v.Name ~= 'bed' then
 									if not cachedIsBreakable(v) then continue end
+								end
+								-- New: wall check inside main eval
+								if WallCheck and WallCheck.Enabled then
+									if not hasLineOfSight(v) then continue end
 								end
 								if not passesChecks(v) then continue end
 								if BreakerAngle and BreakerAngle.Value < 360 then
@@ -13026,6 +13122,13 @@ run(function()
 		end
 	})
 
+	-- New: WallCheck toggle (enabled by default)
+	WallCheck = Breaker:CreateToggle({
+		Name = 'Wall Check (Line of Sight)',
+		Default = true,
+		Tooltip = 'Skip blocks that are not visible (e.g. enclosed over a bed). Uses raycasts to check obstruction.'
+	})
+
 	BreakerAngle = Breaker:CreateSlider({
 		Name = 'Break Angle',
 		Min = 0,
@@ -13040,7 +13143,7 @@ run(function()
 		end
 	end)
 end)
-	
+
 																																
 run(function()
 	local FPSBoost
