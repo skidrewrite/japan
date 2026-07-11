@@ -12243,6 +12243,9 @@ end
 
 -- Full modified breaker module with WallCheck (raycast line-of-sight) integrated
 
+-- Full modified breaker module with WallCheck (raycast line-of-sight) and
+-- automatic "break blocking block first" behavior for beds when enclosed.
+
 run(function()
 	local Breaker
 	local Range
@@ -12691,7 +12694,6 @@ run(function()
 		if lplr and lplr.Character then
 			table.insert(ignoreList, lplr.Character)
 		end
-		-- ignore small helpers that may interfere
 		params.FilterDescendantsInstances = ignoreList
 
 		local origin = hrp.Position + Vector3.new(0, 1.5, 0)
@@ -12728,13 +12730,59 @@ run(function()
 					visible = true
 					break
 				end
-				-- Also treat glass or transparent thin parts as non-blocking? (optional)
-				-- For now we treat any hit not part-owned as blocking.
 			end
 		end
 
 		sightCache[part] = {v = visible, t = now}
 		return visible
+	end
+
+	-- New: find blocking placed block between player and target part (returns placed block Instance or nil)
+	local function findBlockingPlacedBlock(targetPart)
+		if not targetPart or not targetPart.Parent then return nil end
+
+		local hrp = (entitylib and entitylib.character and entitylib.character.RootPart) or (lplr.Character and (lplr.Character:FindFirstChild('HumanoidRootPart') or lplr.Character:FindFirstChild('HumanoidRootPart')))
+		if not hrp then return nil end
+
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Blacklist
+		local ignoreList = {}
+		if lplr and lplr.Character then table.insert(ignoreList, lplr.Character) end
+		params.FilterDescendantsInstances = ignoreList
+
+		local origin = hrp.Position + Vector3.new(0, 1.5, 0)
+		local dir = targetPart.Position - origin
+		if dir.Magnitude <= 0 then return nil end
+
+		-- Cast a single ray toward the center of the target; if it hits something that's not the target, try to resolve it to a placed block
+		local rayResult = workspace:Raycast(origin, dir, params)
+		if not rayResult then return nil end
+		if rayResult.Instance == targetPart or rayResult.Instance:IsDescendantOf(targetPart) then
+			return nil
+		end
+
+		-- Attempt to find the placed block at the hit position (round to grid)
+		local hitPos = rayResult.Position
+		local rounded = roundPos(hitPos)
+		local placed = getPlacedBlock(rounded)
+		if placed and placed.Parent then
+			return placed
+		end
+
+		-- If not found by position, try to find an ancestor of the hit instance that is a tracked placed block
+		local inst = rayResult.Instance
+		while inst and inst ~= workspace do
+			-- Some placed blocks may be direct BaseParts; check if it matches a stored block in store.blocks by proximity
+			if inst:IsA('BasePart') then
+				local check = getPlacedBlock(roundPos(inst.Position))
+				if check and check.Parent then
+					return check
+				end
+			end
+			inst = inst.Parent
+		end
+
+		return nil
 	end
 
 	local function attemptBreak(tab, localPosition, skipBreakCheck)
@@ -12749,11 +12797,31 @@ run(function()
 			end
 			-- New: wall check / line-of-sight
 			if WallCheck and WallCheck.Enabled then
-				if not hasLineOfSight(v) then continue end
+				if not hasLineOfSight(v) then
+					-- If the target is a bed, try to find a blocking placed block and prefer that
+					if v.Name == 'bed' then
+						local blocker = findBlockingPlacedBlock(v)
+						if blocker and blocker.Parent and cachedIsBreakable(blocker) and passesChecks(blocker) then
+							local bdist = (blocker.Position - localPosition).Magnitude
+							if bdist < bestDist and bdist < Range.Value then
+								best = blocker
+								bestDist = bdist
+							end
+						end
+					end
+					-- otherwise skip
+					if best ~= nil then
+						-- continue searching (we set best if we found a blocker)
+					else
+						continue
+					end
+				end
 			end
 			if not passesChecks(v) then continue end
-			best = v
-			bestDist = dist
+			if best == nil or dist < bestDist then
+				best = v
+				bestDist = dist
+			end
 		end
 		if not best then return false end
 		return doBreak(best)
@@ -12771,19 +12839,29 @@ run(function()
 				if dist < Range.Value and dist < bestDist then
 					if cachedIsBreakable(v) and passesChecks(v) then
 						-- New: wall check
-						if WallCheck and WallCheck.Enabled then
-							if not hasLineOfSight(v) then
-								-- skip blocked ones
-								continue
+						if WallCheck and WallCheck.Enabled and not hasLineOfSight(v) then
+							-- If it's a bed (or named as bed-like), try find blocking placed block in front and pick that
+							if v.Name == 'bed' then
+								local blocker = findBlockingPlacedBlock(v)
+								if blocker and blocker.Parent and cachedIsBreakable(blocker) and passesChecks(blocker) then
+									local bdist = (blocker.Position - localPosition).Magnitude
+									if bdist < bestDist and bdist < Range.Value then
+										best = blocker
+										bestDist = bdist
+									end
+									-- prefer the blocker instead of the bed until broken
+									goto continue_outer
+								end
 							end
+							-- otherwise skip this v
+							goto continue_outer
 						end
-						if true then
-							best = v
-							bestDist = dist
-						end
+						best = v
+						bestDist = dist
 					end
 				end
 			end
+			::continue_outer::
 		end
 		if best then return doBreak(best) end
 		return false
@@ -12898,7 +12976,23 @@ run(function()
 								end
 								-- New: wall check inside main eval
 								if WallCheck and WallCheck.Enabled then
-									if not hasLineOfSight(v) then continue end
+									if not hasLineOfSight(v) then
+										-- If the candidate is a bed, attempt to find the blocking placed block and target that instead
+										if v.Name == 'bed' then
+											local blocker = findBlockingPlacedBlock(v)
+											if blocker and blocker.Parent and cachedIsBreakable(blocker) and passesChecks(blocker) then
+												local bdist = (blocker.Position - localPosition).Magnitude
+												if bdist < bestDist and bdist < Range.Value then
+													best = blocker
+													bestDist = bdist
+												end
+											end
+										end
+										-- otherwise skip non-visible candidates
+										if best == nil then
+											continue
+										end
+									end
 								end
 								if not passesChecks(v) then continue end
 								if BreakerAngle and BreakerAngle.Value < 360 then
