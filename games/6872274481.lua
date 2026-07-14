@@ -45287,3 +45287,92 @@ run(function()
         Tooltip = 'Take no fall damage.'
     })
 end)
+
+			run(function()
+    local VoidLoot
+    local VoidHeight
+    local Network
+    local DroppedItems = {}
+    
+    VoidLoot = vape.Categories.Utility:CreateModule({
+        Name = 'VoidLoot',
+        Function = function(callback)
+            if callback then
+                local items = collection('ItemDrop', VoidLoot)
+                repeat
+                    if entitylib.isAlive then
+                        local localPosition = entitylib.character.HumanoidRootPart.Position
+                        
+                        for _, v in items do
+                            if tick() - (v:GetAttribute('ClientDropTime') or 0) < 2 then continue end
+                            
+                            -- Check if item is diamond, iron, or emerald
+                            local itemName = v.Name:lower()
+                            if itemName:find('diamond') or itemName:find('iron') or itemName:find('emerald') or itemName:find('em') then
+                                if isnetworkowner(v) and Network.Enabled and entitylib.character.Humanoid.Health > 0 then
+                                    -- Send item to void at specified height
+                                    local voidHeight = VoidHeight.Value
+                                    local targetPosition = Vector3.new(v.Position.X, voidHeight, v.Position.Z)
+                                    
+                                    -- Teleport item to void position
+                                    v.CFrame = CFrame.new(targetPosition)
+                                    
+                                    -- Set velocity to zero to freeze it
+                                    if v:FindFirstChild('BodyVelocity') then
+                                        v.BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+                                    else
+                                        v.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                                    end
+                                    
+                                    -- Store the item as dropped
+                                    DroppedItems[v] = targetPosition
+                                end
+                            elseif DroppedItems[v] and entitylib.character.Humanoid.Health > 0 then
+                                -- Keep dropped items at their void position only if alive
+                                v.CFrame = CFrame.new(DroppedItems[v])
+                                if v:FindFirstChild('BodyVelocity') then
+                                    v.BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+                                else
+                                    v.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                                end
+                            end
+                        end
+                    else
+                        -- Launch all dropped items upward when dead
+                        for item, _ in pairs(DroppedItems) do
+                            if item and item.Parent then
+                                local upwardVelocity = Vector3.new(0, 100, 0)
+                                if item:FindFirstChild('BodyVelocity') then
+                                    item.BodyVelocity.Velocity = upwardVelocity
+                                else
+                                    item.AssemblyLinearVelocity = upwardVelocity
+                                end
+                            end
+                        end
+                        DroppedItems = {}
+                    end
+                    task.wait(0.1)
+                until not VoidLoot.Enabled
+                
+                -- Clear dropped items table when disabled
+                DroppedItems = {}
+            end
+        end,
+        Tooltip = 'Sends diamond, iron, and emerald to the void'
+    })
+    
+    VoidHeight = VoidLoot:CreateSlider({
+        Name = 'Void Height',
+        Min = -500,
+        Max = -50,
+        Default = -200,
+        Suffix = function(val) 
+            return val == 1 and 'stud' or 'studs' 
+        end
+    })
+    
+    Network = VoidLoot:CreateToggle({
+        Name = 'Network TP',
+        Default = true
+    })
+end)
