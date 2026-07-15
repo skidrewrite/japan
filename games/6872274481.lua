@@ -13667,90 +13667,65 @@ run(function()
                         local localPosition = entitylib.character.HumanoidRootPart.Position
                         
                         for _, v in items do
-                            if tick() - (v:GetAttribute('ClientDropTime') or 0) < 2 then continue end
+                            -- Only process items dropped AFTER module was enabled
+                            local dropTime = v:GetAttribute('ClientDropTime') or 0
                             
-                            -- Check if item is in the void (below a certain Y position)
-                            if v.Position.Y < -100 then
-                                if isnetworkowner(v) and Network.Enabled and entitylib.character.Humanoid.Health > 0 then
-                                    -- Freeze item at the specified void height
+                            if isnetworkowner(v) and Network.Enabled and entitylib.character.Humanoid.Health > 0 then
+                                -- Teleport item to frozen height immediately
+                                if not FrozenItems[v] then
                                     local voidHeight = Height.Value
                                     local targetPosition = Vector3.new(v.Position.X, voidHeight, v.Position.Z)
                                     
-                                    -- Teleport item to frozen position
                                     v.CFrame = CFrame.new(targetPosition)
+                                    v.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                                     
-                                    -- Freeze the item by setting velocity to zero
-                                    if v:FindFirstChild('BodyVelocity') then
-                                        v.BodyVelocity.Velocity = Vector3.new(0, 0, 0)
-                                    else
-                                        v.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                                    end
-                                    
-                                    -- Store the item as frozen
                                     FrozenItems[v] = targetPosition
-                                end
-                            elseif FrozenItems[v] and entitylib.character.Humanoid.Health > 0 then
-                                -- Keep frozen items at their frozen position only if alive
-                                v.CFrame = CFrame.new(FrozenItems[v])
-                                if v:FindFirstChild('BodyVelocity') then
-                                    v.BodyVelocity.Velocity = Vector3.new(0, 0, 0)
                                 else
+                                    -- Keep item frozen at height
+                                    v.CFrame = CFrame.new(FrozenItems[v])
                                     v.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                                 end
                             end
                         end
-                    else
-                        -- Launch all frozen items upward when dead
-                        for item, _ in pairs(FrozenItems) do
-                            if item and item.Parent then
-                                local upwardVelocity = Vector3.new(0, 100, 0)
-                                if item:FindFirstChild('BodyVelocity') then
-                                    item.BodyVelocity.Velocity = upwardVelocity
-                                else
-                                    item.AssemblyLinearVelocity = upwardVelocity
-                                end
-                            end
-                        end
-                        FrozenItems = {}
                     end
                     task.wait(0.1)
                 until not LootTP.Enabled
                 
-                -- When disabled, teleport all frozen items to player's humanoid
-                for item, _ in pairs(FrozenItems) do
-                    if item and item.Parent then
-                        task.spawn(function()
-                            -- Teleport to player humanoid first
-                            local playerHumanoid = entitylib.character.HumanoidRootPart
-                            if playerHumanoid then
-                                item.CFrame = CFrame.new(playerHumanoid.Position)
-                            end
-                            
-                            task.wait(0.05)
-                            
-                            bedwars.Client:Get(remotes.PickupItem):CallServerAsync({
-                                itemDrop = item
-                            }):andThen(function(suc)
-                                if suc and bedwars.SoundList then
-                                    bedwars.SoundManager:playSound(bedwars.SoundList.PICKUP_ITEM_DROP)
-                                    local sound = bedwars.ItemMeta[item.Name].pickUpOverlaySound
-                                    if sound then
-                                        bedwars.SoundManager:playSound(sound, {
-                                            position = item.Position,
-                                            volumeMultiplier = 0.9
-                                        })
-                                    end
+                -- When disabled, teleport all frozen items to player and pick them up
+                if entitylib.isAlive then
+                    for item, _ in pairs(FrozenItems) do
+                        if item and item.Parent then
+                            task.spawn(function()
+                                local playerHumanoid = entitylib.character.HumanoidRootPart
+                                if playerHumanoid then
+                                    item.CFrame = CFrame.new(playerHumanoid.Position)
                                 end
+                                
+                                task.wait(0.05)
+                                
+                                bedwars.Client:Get(remotes.PickupItem):CallServerAsync({
+                                    itemDrop = item
+                                }):andThen(function(suc)
+                                    if suc and bedwars.SoundList then
+                                        bedwars.SoundManager:playSound(bedwars.SoundList.PICKUP_ITEM_DROP)
+                                        local sound = bedwars.ItemMeta[item.Name].pickUpOverlaySound
+                                        if sound then
+                                            bedwars.SoundManager:playSound(sound, {
+                                                position = item.Position,
+                                                volumeMultiplier = 0.9
+                                            })
+                                        end
+                                    end
+                                end)
                             end)
-                        end)
+                        end
                     end
                 end
                 
-                -- Clear frozen items table
                 FrozenItems = {}
             end
         end,
-        Tooltip = 'Retrieves frozen loot from void'
+        Tooltip = 'Freezes dropped items at set height, teleports to you when disabled'
     })
     
     Height = LootTP:CreateSlider({
