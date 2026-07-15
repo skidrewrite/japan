@@ -43916,310 +43916,7 @@ run(function()
 	})
 end)
 
-run(function()
-	local VoidDropTP
-	local Pickup
-	local OwnDrops
-	local StealOthers
-	local ServerCheck
-	local ReturnHeight
-	local DropMemory = {}
-	local HeldDrops = {}
-	local lastSafePosition
-	local lastSafeCFrame
-	local holdCounter = 0
-	local lastPickup = 0
-	local grabbing = {}
 
-	local function getDropPart(drop)
-		if not drop then return end
-		if drop:IsA('BasePart') then return drop end
-		if drop:IsA('Model') then
-			return drop:FindFirstChild('Handle') or drop.PrimaryPart
-		end
-		return drop:FindFirstChild('Handle')
-	end
-
-	local function getLowestPoint()
-		local lowest = math.huge
-		for _, v in pairs(store.blocks) do
-			local point = (v.Position.Y - (v.Size.Y / 2)) + ReturnHeight.Value
-			if point < lowest then
-				lowest = point
-			end
-		end
-		return lowest == math.huge and -100 or lowest
-	end
-
-	local function getDropHoldPosition(index)
-		local base = lastSafePosition
-		if not base and entitylib.isAlive and entitylib.character.RootPart then
-			base = entitylib.character.RootPart.Position
-		end
-		if not base then
-			base = gameCamera.CFrame.Position
-		end
-
-		local row = math.floor((index - 1) / 4)
-		local col = ((index - 1) % 4) - 1.5
-		local offset = Vector3.new(col * 1.25, 2.8 + (row * 0.35), -2)
-		return lastSafeCFrame and (lastSafeCFrame * CFrame.new(offset)).Position or (base + offset)
-	end
-
-	local function updateSafePosition(lowestPoint)
-		if not entitylib.isAlive or not entitylib.character.RootPart then return end
-		local root = entitylib.character.RootPart
-		if root.Position.Y <= lowestPoint - ReturnHeight.Value + 18 then return end
-		if root.AssemblyLinearVelocity.Y < -55 then return end
-
-		lastSafePosition = root.Position
-		lastSafeCFrame = root.CFrame
-	end
-
-	local function rememberDrop(drop)
-		local part = getDropPart(drop)
-		if not part then return end
-
-		local fromSelf = (tick() - (drop:GetAttribute('ClientDropTime') or 0)) < 2
-		if not fromSelf and entitylib.isAlive and entitylib.character.RootPart then
-			fromSelf = (part.Position - entitylib.character.RootPart.Position).Magnitude <= 24
-		end
-		if not fromSelf and lastSafePosition then
-			fromSelf = (part.Position - lastSafePosition).Magnitude <= 40
-		end
-
-		holdCounter += 1
-		DropMemory[drop] = {
-			fromSelf = fromSelf,
-			lastSeen = tick(),
-			holdIndex = ((holdCounter - 1) % 16) + 1
-		}
-	end
-
-	local function playPickupSound(drop, part)
-		if not bedwars.SoundList then return end
-		bedwars.SoundManager:playSound(bedwars.SoundList.PICKUP_ITEM_DROP)
-
-		local itemMeta = bedwars.ItemMeta[drop.Name]
-		local sound = itemMeta and itemMeta.pickUpOverlaySound
-		if sound then
-			bedwars.SoundManager:playSound(sound, {
-				position = part.Position,
-				volumeMultiplier = 0.9
-			})
-		end
-	end
-
-	local function moveDrop(drop, part, position)
-		pcall(function()
-			if drop:IsA('Model') then
-				drop:PivotTo(CFrame.new(position))
-			else
-				part.CFrame = CFrame.new(position)
-			end
-			part.AssemblyLinearVelocity = Vector3.zero
-			part.AssemblyAngularVelocity = Vector3.zero
-		end)
-	end
-
-	local function requestPickup(drop, part)
-		bedwars.Client:Get(remotes.PickupItem):CallServerAsync({
-			itemDrop = drop
-		}):andThen(function(suc)
-			if suc then
-				playPickupSound(drop, part)
-			end
-		end)
-
-		if part ~= drop then
-			bedwars.Client:Get(remotes.PickupItem):CallServerAsync({
-				itemDrop = part
-			})
-		end
-	end
-
-	local function tryPickup(drop, part, root)
-		if Pickup.Enabled and (tick() - lastPickup) < 0.1 then return end
-		if grabbing[drop] then return end
-		if Pickup.Enabled then
-			lastPickup = tick()
-		end
-		grabbing[drop] = true
-		local originalPosition = part.Position
-
-		task.spawn(function()
-			for _ = 1, 5 do
-				if not VoidDropTP.Enabled or not entitylib.isAlive or not root.Parent or not drop.Parent or not part.Parent then break end
-
-				local target = root.Position + (root.CFrame.LookVector * 2) + Vector3.new(0, 1.5, 0)
-				moveDrop(drop, part, target)
-
-				if firetouchinterest then
-					pcall(function()
-						firetouchinterest(root, part, 0)
-						firetouchinterest(root, part, 1)
-					end)
-				end
-
-				if Pickup.Enabled then
-					requestPickup(drop, part)
-				end
-
-				if Pickup.Enabled and ServerCheck.Enabled and not isnetworkowner(part) then
-					local old = root.CFrame
-					pcall(function()
-						root.CFrame = CFrame.new(originalPosition + Vector3.new(0, 2, 0))
-					end)
-					task.wait()
-					requestPickup(drop, part)
-					pcall(function()
-						root.CFrame = old
-					end)
-				end
-
-				task.wait(0.08)
-			end
-
-			grabbing[drop] = nil
-		end)
-	end
-
-	local function holdDrop(drop, part)
-		local memory = DropMemory[drop]
-		if not memory then
-			rememberDrop(drop)
-			memory = DropMemory[drop]
-		end
-		if not memory then return end
-
-		HeldDrops[drop] = true
-		memory.lastSeen = tick()
-		moveDrop(drop, part, getDropHoldPosition(memory.holdIndex or 1))
-	end
-
-	local function deliverHeldDrop(drop, part, root)
-		if not root then return end
-		local target = root.Position + (root.CFrame.LookVector * 2) + Vector3.new(0, 1.5, 0)
-		moveDrop(drop, part, target)
-
-		if firetouchinterest then
-			pcall(function()
-				firetouchinterest(root, part, 0)
-				firetouchinterest(root, part, 1)
-			end)
-		end
-
-		if Pickup.Enabled then
-			requestPickup(drop, part)
-		end
-	end
-
-	VoidDropTP = vape.Categories.Utility:CreateModule({
-		Name = 'VoidDropTP',
-		Function = function(callback)
-			if callback then
-				local drops = collection('ItemDrop', VoidDropTP, function(tab, obj)
-					table.insert(tab, obj)
-					rememberDrop(obj)
-				end, function(tab, obj)
-					DropMemory[obj] = nil
-					HeldDrops[obj] = nil
-					grabbing[obj] = nil
-					local ind = table.find(tab, obj)
-					if ind then
-						table.remove(tab, ind)
-					end
-				end)
-
-				repeat task.wait() until store.matchState ~= 0 or (not VoidDropTP.Enabled)
-				if not VoidDropTP.Enabled then return end
-
-				repeat
-					local lowestPoint = getLowestPoint()
-					updateSafePosition(lowestPoint)
-					local alive = entitylib.isAlive and entitylib.character.RootPart
-					local root = alive and entitylib.character.RootPart or nil
-
-					for _, drop in pairs(drops) do
-						local part = getDropPart(drop)
-						if not part then continue end
-
-						local memory = DropMemory[drop]
-						if not memory then
-							rememberDrop(drop)
-							memory = DropMemory[drop]
-						end
-
-						local fromSelf = memory and memory.fromSelf
-						if OwnDrops.Enabled and not StealOthers.Enabled and not fromSelf then continue end
-
-						local clientMarked = (drop:GetAttribute('ClientDropTime') or 0) > tick()
-						local fallingWithDrop = root and root.Position.Y <= lowestPoint
-						if part.Position.Y > lowestPoint and not HeldDrops[drop] and not clientMarked and not fallingWithDrop then continue end
-
-						if not alive then
-							holdDrop(drop, part)
-							continue
-						end
-
-						if StealOthers.Enabled and not fromSelf then
-							deliverHeldDrop(drop, part, root)
-							continue
-						end
-
-						if HeldDrops[drop] then
-							deliverHeldDrop(drop, part, root)
-						else
-							holdDrop(drop, part)
-						end
-
-						tryPickup(drop, part, root)
-					end
-					task.wait(0.025)
-				until not VoidDropTP.Enabled
-			else
-				table.clear(DropMemory)
-				table.clear(HeldDrops)
-				table.clear(grabbing)
-				lastSafePosition = nil
-				lastSafeCFrame = nil
-				holdCounter = 0
-				lastPickup = 0
-			end
-		end,
-		Tooltip = 'Teleports your voided drops back to you'
-	})
-
-	OwnDrops = VoidDropTP:CreateToggle({
-		Name = 'Own Drops Only',
-		Default = true,
-		Tooltip = 'Only recover drops that appeared near you'
-	})
-	StealOthers = VoidDropTP:CreateToggle({
-		Name = 'Steal Others',
-		Default = false,
-		Tooltip = 'Recover any player drop that falls into the void'
-	})
-	Pickup = VoidDropTP:CreateToggle({
-		Name = 'Auto Pickup',
-		Default = false,
-		Tooltip = 'Attempts to pick up recovered drops'
-	})
-	ServerCheck = VoidDropTP:CreateToggle({
-		Name = 'Server Check',
-		Default = true,
-		Tooltip = 'Briefly satisfies server pickup distance checks for other drops'
-	})
-	ReturnHeight = VoidDropTP:CreateSlider({
-		Name = 'Void Height',
-		Min = 20,
-		Max = 9999,
-		Default = 9999,
-		Suffix = function(val)
-			return val == 1 and 'stud' or 'studs'
-		end
-	})
-end)
 run(function()
 	local LootGrabber
 	local Range
@@ -45488,50 +45185,81 @@ run(function()
 end)
 
 run(function()
-    local VoidLoot
+    local VoidDropper
     local VoidHeight
     local Network
     local FrozenItems = {}
     
-    VoidLoot = vape.Categories.Utility:CreateModule({
-        Name = 'VoidLoot',
+    VoidDropper = vape.Categories.Utility:CreateModule({
+        Name = 'Void Dropper',
         Function = function(callback)
             if callback then
-                local items = collection('ItemDrop', VoidLoot)
-                local itemsToFreeze = {}
-                
-                -- Collect all items to freeze
-                for _, v in items do
-                    if tick() - (v:GetAttribute('ClientDropTime') or 0) < 2 then continue end
-                    
-                    if isnetworkowner(v) and Network.Enabled and entitylib.character.Humanoid.Health > 0 then
-                        table.insert(itemsToFreeze, v)
-                    end
-                end
-                
-                -- Teleport all items to void and freeze them
-                local voidHeight = VoidHeight.Value
-                for _, v in pairs(itemsToFreeze) do
-                    local targetPosition = Vector3.new(v.Position.X, voidHeight, v.Position.Z)
-                    v.CFrame = CFrame.new(targetPosition)
-                    
-                    if v:FindFirstChild('BodyVelocity') then
-                        v.BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+                local items = collection('ItemDrop', VoidDropper)
+                repeat
+                    if entitylib.isAlive then
+                        local localPosition = entitylib.character.HumanoidRootPart.Position
+                        
+                        for _, v in items do
+                            if tick() - (v:GetAttribute('ClientDropTime') or 0) < 2 then continue end
+                            
+                            local itemName = v.Name:lower()
+                            local isTarget = itemName:find('diamond') or itemName:find('iron') or itemName:find('emerald') or itemName:find('em')
+                            
+                            -- Check if item is in the void
+                            if isTarget and v.Position.Y < -100 then
+                                if isnetworkowner(v) and Network.Enabled and entitylib.character.Humanoid.Health > 0 then
+                                    -- Freeze item at the specified void height
+                                    local voidHeight = VoidHeight.Value
+                                    local targetPosition = Vector3.new(v.Position.X, voidHeight, v.Position.Z)
+                                    
+                                    -- Teleport item to frozen position
+                                    v.CFrame = CFrame.new(targetPosition)
+                                    
+                                    -- Freeze the item by setting velocity to zero
+                                    if v:FindFirstChild('BodyVelocity') then
+                                        v.BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+                                    else
+                                        v.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                                    end
+                                    
+                                    -- Store the item as frozen
+                                    FrozenItems[v] = targetPosition
+                                end
+                            elseif FrozenItems[v] and entitylib.character.Humanoid.Health > 0 then
+                                -- Keep frozen items at their frozen position only if alive
+                                v.CFrame = CFrame.new(FrozenItems[v])
+                                if v:FindFirstChild('BodyVelocity') then
+                                    v.BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+                                else
+                                    v.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                                end
+                            end
+                        end
                     else
-                        v.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        -- Launch all frozen items upward when dead
+                        for item, _ in pairs(FrozenItems) do
+                            if item and item.Parent then
+                                local upwardVelocity = Vector3.new(0, 100, 0)
+                                if item:FindFirstChild('BodyVelocity') then
+                                    item.BodyVelocity.Velocity = upwardVelocity
+                                else
+                                    item.AssemblyLinearVelocity = upwardVelocity
+                                end
+                            end
+                        end
+                        FrozenItems = {}
                     end
-                    
-                    FrozenItems[v] = targetPosition
-                end
+                    task.wait(0.1)
+                until not VoidDropper.Enabled
                 
-                -- Auto disable after placing all items
-                VoidLoot:Toggle()
+                -- Clear frozen items table
+                FrozenItems = {}
             end
         end,
-        Tooltip = 'Instantly sends all loot to void (use keybind)'
+        Tooltip = 'Freezes iron, diamonds, and emeralds in the void'
     })
     
-    VoidHeight = VoidLoot:CreateSlider({
+    VoidHeight = VoidDropper:CreateSlider({
         Name = 'Void Height',
         Min = -500,
         Max = -50,
@@ -45541,12 +45269,11 @@ run(function()
         end
     })
     
-    Network = VoidLoot:CreateToggle({
+    Network = VoidDropper:CreateToggle({
         Name = 'Network TP',
         Default = true
     })
 end)
-
 run(function()
     local KingDraco
     local RangeSetting, SpeedSetting, TickRate, BreakMode
@@ -46179,64 +45906,86 @@ run(function()
 end)
 
 run(function()
-    local LootRetrieve
-    local RetrievalSpeed
+    local VoidRetriever
+    local Network
+    local FrozenItems = {}
     
-    LootRetrieve = vape.Categories.Utility:CreateModule({
-        Name = 'Loot Retrieve',
+    VoidRetriever = vape.Categories.Utility:CreateModule({
+        Name = 'Void Retriever',
         Function = function(callback)
             if callback then
+                local items = collection('ItemDrop', VoidRetriever)
                 repeat
                     if entitylib.isAlive then
-                        local items = collectionService:GetTagged('ItemDrop')
-                        local playerPosition = entitylib.character.HumanoidRootPart.Position
+                        local localPosition = entitylib.character.HumanoidRootPart.Position
                         
-                        for _, item in items do
-                            if item and item.Parent then
-                                -- Calculate direction to player
-                                local direction = (playerPosition - item.Position).Unit
-                                local distance = (playerPosition - item.Position).Magnitude
-                                
-                                -- Move item towards player
-                                if distance > 3 then
-                                    item.Position = item.Position + (direction * RetrievalSpeed.Value)
-                                else
-                                    -- Pickup item when close enough
-                                    task.spawn(function()
-                                        bedwars.Client:Get(remotes.PickupItem):CallServerAsync({
-                                            itemDrop = item
-                                        }):andThen(function(suc)
-                                            if suc and bedwars.SoundList then
-                                                bedwars.SoundManager:playSound(bedwars.SoundList.PICKUP_ITEM_DROP)
-                                                local sound = bedwars.ItemMeta[item.Name].pickUpOverlaySound
-                                                if sound then
-                                                    bedwars.SoundManager:playSound(sound, {
-                                                        position = item.Position,
-                                                        volumeMultiplier = 0.9
-                                                    })
-                                                end
-                                            end
-                                        end)
-                                    end)
+                        for _, v in items do
+                            if tick() - (v:GetAttribute('ClientDropTime') or 0) < 2 then continue end
+                            
+                            -- Check if item is in the void
+                            if v.Position.Y < -100 then
+                                if isnetworkowner(v) and Network.Enabled and entitylib.character.Humanoid.Health > 0 then
+                                    -- Store frozen items
+                                    FrozenItems[v] = true
                                 end
                             end
                         end
+                    else
+                        -- Launch all frozen items upward when dead
+                        for item, _ in pairs(FrozenItems) do
+                            if item and item.Parent then
+                                local upwardVelocity = Vector3.new(0, 100, 0)
+                                if item:FindFirstChild('BodyVelocity') then
+                                    item.BodyVelocity.Velocity = upwardVelocity
+                                else
+                                    item.AssemblyLinearVelocity = upwardVelocity
+                                end
+                            end
+                        end
+                        FrozenItems = {}
                     end
-                    
-                    task.wait(0.05)
-                until not LootRetrieve.Enabled
+                    task.wait(0.1)
+                until not VoidRetriever.Enabled
+                
+                -- When disabled, teleport all void items to player
+                for item, _ in pairs(FrozenItems) do
+                    if item and item.Parent then
+                        task.spawn(function()
+                            -- Teleport to player humanoid first
+                            local playerHumanoid = entitylib.character.HumanoidRootPart
+                            if playerHumanoid then
+                                item.CFrame = CFrame.new(playerHumanoid.Position)
+                            end
+                            
+                            task.wait(0.05)
+                            
+                            bedwars.Client:Get(remotes.PickupItem):CallServerAsync({
+                                itemDrop = item
+                            }):andThen(function(suc)
+                                if suc and bedwars.SoundList then
+                                    bedwars.SoundManager:playSound(bedwars.SoundList.PICKUP_ITEM_DROP)
+                                    local sound = bedwars.ItemMeta[item.Name].pickUpOverlaySound
+                                    if sound then
+                                        bedwars.SoundManager:playSound(sound, {
+                                            position = item.Position,
+                                            volumeMultiplier = 0.9
+                                        })
+                                    end
+                                end
+                            end)
+                        end)
+                    end
+                end
+                
+                -- Clear frozen items table
+                FrozenItems = {}
             end
         end,
-        Tooltip = 'Teleports loot back to you'
+        Tooltip = 'Retrieves frozen loot from the void'
     })
     
-    RetrievalSpeed = LootRetrieve:CreateSlider({
-        Name = 'Speed',
-        Min = 1,
-        Max = 50,
-        Default = 10,
-        Suffix = function(val) 
-            return val == 1 and 'stud' or 'studs' 
-        end
+    Network = VoidRetriever:CreateToggle({
+        Name = 'Network TP',
+        Default = true
     })
 end)
