@@ -13751,7 +13751,7 @@ run(function()
                 FrozenItems = {}
             end
         end,
-        Tooltip = 'Freezes dropped items at a specific void height and launches them when you die'
+        Tooltip = 'Retrieves frozen loot from void'
     })
     
     Height = LootTP:CreateSlider({
@@ -45288,77 +45288,48 @@ run(function()
     })
 end)
 
-			run(function()
+run(function()
     local VoidLoot
     local VoidHeight
     local Network
-    local DroppedItems = {}
+    local FrozenItems = {}
     
     VoidLoot = vape.Categories.Utility:CreateModule({
         Name = 'VoidLoot',
         Function = function(callback)
             if callback then
                 local items = collection('ItemDrop', VoidLoot)
-                repeat
-                    if entitylib.isAlive then
-                        local localPosition = entitylib.character.HumanoidRootPart.Position
-                        
-                        for _, v in items do
-                            if tick() - (v:GetAttribute('ClientDropTime') or 0) < 2 then continue end
-                            
-                            -- Check if item is diamond, iron, or emerald
-                            local itemName = v.Name:lower()
-                            if itemName:find('diamond') or itemName:find('iron') or itemName:find('emerald') or itemName:find('em') then
-                                if isnetworkowner(v) and Network.Enabled and entitylib.character.Humanoid.Health > 0 then
-                                    -- Send item to void at specified height
-                                    local voidHeight = VoidHeight.Value
-                                    local targetPosition = Vector3.new(v.Position.X, voidHeight, v.Position.Z)
-                                    
-                                    -- Teleport item to void position
-                                    v.CFrame = CFrame.new(targetPosition)
-                                    
-                                    -- Set velocity to zero to freeze it
-                                    if v:FindFirstChild('BodyVelocity') then
-                                        v.BodyVelocity.Velocity = Vector3.new(0, 0, 0)
-                                    else
-                                        v.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                                    end
-                                    
-                                    -- Store the item as dropped
-                                    DroppedItems[v] = targetPosition
-                                end
-                            elseif DroppedItems[v] and entitylib.character.Humanoid.Health > 0 then
-                                -- Keep dropped items at their void position only if alive
-                                v.CFrame = CFrame.new(DroppedItems[v])
-                                if v:FindFirstChild('BodyVelocity') then
-                                    v.BodyVelocity.Velocity = Vector3.new(0, 0, 0)
-                                else
-                                    v.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                                end
-                            end
-                        end
-                    else
-                        -- Launch all dropped items upward when dead
-                        for item, _ in pairs(DroppedItems) do
-                            if item and item.Parent then
-                                local upwardVelocity = Vector3.new(0, 100, 0)
-                                if item:FindFirstChild('BodyVelocity') then
-                                    item.BodyVelocity.Velocity = upwardVelocity
-                                else
-                                    item.AssemblyLinearVelocity = upwardVelocity
-                                end
-                            end
-                        end
-                        DroppedItems = {}
-                    end
-                    task.wait(0.1)
-                until not VoidLoot.Enabled
+                local itemsToFreeze = {}
                 
-                -- Clear dropped items table when disabled
-                DroppedItems = {}
+                -- Collect all items to freeze
+                for _, v in items do
+                    if tick() - (v:GetAttribute('ClientDropTime') or 0) < 2 then continue end
+                    
+                    if isnetworkowner(v) and Network.Enabled and entitylib.character.Humanoid.Health > 0 then
+                        table.insert(itemsToFreeze, v)
+                    end
+                end
+                
+                -- Teleport all items to void and freeze them
+                local voidHeight = VoidHeight.Value
+                for _, v in pairs(itemsToFreeze) do
+                    local targetPosition = Vector3.new(v.Position.X, voidHeight, v.Position.Z)
+                    v.CFrame = CFrame.new(targetPosition)
+                    
+                    if v:FindFirstChild('BodyVelocity') then
+                        v.BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+                    else
+                        v.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    end
+                    
+                    FrozenItems[v] = targetPosition
+                end
+                
+                -- Auto disable after placing all items
+                VoidLoot:Toggle()
             end
         end,
-        Tooltip = 'Sends diamond, iron, and emerald to the void'
+        Tooltip = 'Instantly sends all loot to void (use keybind)'
     })
     
     VoidHeight = VoidLoot:CreateSlider({
