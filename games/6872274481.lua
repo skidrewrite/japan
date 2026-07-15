@@ -42865,28 +42865,45 @@ end)
 
 run(function()
     local BedProtector
-    local currentLayer = 0
- 
-    local function getBedNear()
-        local localPosition = entitylib.isAlive and entitylib.character.HumanoidRootPart.Position or Vector3.zero
-        for _, v in pairs(collectionService:GetTagged('bed')) do
-            if (localPosition - v.Position).Magnitude < 20 and v:GetAttribute('Team'..(lplr:GetAttribute('Team') or -1)..'NoBreak') then
-                return v
-            end
-        end
-    end
+    local PlaceRange
+    local Blacklist
+    local Mode
+    local Smart
+    local Switch
+    local Layers
+    local AutoPatch
+    local ProtectedLayers
+    local PlacementSpeed
 
-    local function getCurrentBlock()
-        local item = store.inventory.inventory.hand
-        if item then
-            local block = bedwars.ItemMeta[item.itemType].block
-            if block then
-                return item.itemType
+    local function getBedNear()
+        local localPosition = entitylib.isAlive and entitylib.character.RootPart.Position or Vector3.zero
+        for _, v in collectionService:GetTagged('bed') do
+            if
+                (localPosition - v.Position).Magnitude < 14
+                and v:GetAttribute('Team' .. (lplr:GetAttribute('Team') or -1) .. 'NoBreak')
+            then
+                return v
             end
         end
         return nil
     end
- 
+
+    local function getBlocks()
+        local blocks = {}
+        for _, item in store.inventory.inventory.items do
+            local block = bedwars.ItemMeta[item.itemType].block
+            if
+                block and not table.find(Blacklist.ListEnabled, item.itemType:find('wool') and 'wool' or item.itemType)
+            then
+                table.insert(blocks, { item.itemType, block.health, item.tool })
+            end
+        end
+        table.sort(blocks, function(a, b)
+            return a[2] > b[2]
+        end)
+        return blocks
+    end
+
     local function getPyramid(size, grid)
         local positions = {}
         for h = size, 0, -1 do
@@ -42900,97 +42917,184 @@ run(function()
         return positions
     end
 
-    local function getBedAxis(bed)
-        for _, other in pairs(collectionService:GetTagged('bed')) do
-            if other ~= bed and other:GetAttribute('Team'..(lplr:GetAttribute('Team') or -1)..'NoBreak') then
-                local offset = other.Position - bed.Position
-                if offset.Magnitude > 1 and offset.Magnitude <= 7 then
-                    if math.abs(offset.X) > math.abs(offset.Z) then
-                        return Vector3.new(offset.X >= 0 and 1 or -1, 0, 0)
-                    end
-                    return Vector3.new(0, 0, offset.Z >= 0 and 1 or -1)
+    local function isEnemy(player)
+        if not player then return false end
+        local myTeam = lplr:GetAttribute('Team')
+        return player:GetAttribute('Team') ~= myTeam
+    end
+
+    local function isWithinProtectedLayers(worldPos, bed)
+        if not bed then return false end
+        local relPos = bed.CFrame:PointToObjectSpace(worldPos)
+        local gx = math.floor(relPos.X / 3 + 0.5)
+        local gy = math.floor(relPos.Y / 3 + 0.5)
+        local gz = math.floor(relPos.Z / 3 + 0.5)
+        local maxLayer = ProtectedLayers.Value
+        for layer = 1, maxLayer do
+            for _, pos in getPyramid(layer, 3) do
+                local px = math.floor(pos.X / 3 + 0.5)
+                local py = math.floor(pos.Y / 3 + 0.5)
+                local pz = math.floor(pos.Z / 3 + 0.5)
+                if px == gx and py == gy and pz == gz then
+                    return true
                 end
             end
         end
-
-        local cf = bed.CFrame or bed:GetPivot()
-        local size = bed.Size or Vector3.new(3, 1, 6)
-        local axis = size.X > size.Z and cf.RightVector or cf.LookVector
-
-        if math.abs(axis.X) > math.abs(axis.Z) then
-            return Vector3.new(axis.X >= 0 and 1 or -1, 0, 0)
-        end
-        return Vector3.new(0, 0, axis.Z >= 0 and 1 or -1)
+        return false
     end
 
-    local function rotateBedOffset(bed, offset)
-        local axis = getBedAxis(bed)
-        local side = Vector3.new(axis.Z, 0, -axis.X)
-        return (side * offset.X) + Vector3.new(0, offset.Y, 0) + (axis * offset.Z)
-    end
-
-    local function getProtectionPositions(bed, layer)
-        local positions, seen = {}, {}
-        for _, pos in pairs(getPyramid(layer, 3)) do
-            local blockpos = bedwars.BlockController:getBlockPosition(bed.Position + rotateBedOffset(bed, pos))
-            local key = tostring(blockpos)
-            if not seen[key] then
-                seen[key] = true
-                table.insert(positions, blockpos * 3)
-            end
-        end
-        return positions
-    end
- 
-    local function findBrokenPositions(bed)
-        local broken = {}
-        for i = 0, currentLayer do
-            for _, pos in pairs(getProtectionPositions(bed, i)) do
-                if not getPlacedBlock(pos) then
-                    table.insert(broken, pos)
-                end
-            end
-        end
-        return broken
-    end
- 
     BedProtector = vape.Categories.World:CreateModule({
-        Name = 'BedProtector',
+        Name = 'Draco X2',
         Function = function(callback)
             if callback then
-                local bed = getBedNear()
-                if bed then
-                    local blockType = getCurrentBlock()
-                    if blockType then
-                        local brokenPositions = findBrokenPositions(bed)
-                        if #brokenPositions > 0 then
-                            for _, pos in pairs(brokenPositions) do
-                                if not BedProtector.Enabled then break end
-                                bedwars.placeBlock(pos, blockType)
-                                task.wait(0.01)
-                            end
-                        else
-                            currentLayer = currentLayer + 1
-                            for _, pos in pairs(getProtectionPositions(bed, currentLayer)) do
-                                if not BedProtector.Enabled then break end
-                                bedwars.placeBlock(pos, blockType)
-                                task.wait(0.01)
+                BedProtector:Clean(vapeEvents.BreakBlockEvent.Event:Connect(function(data)
+                    if not BedProtector.Enabled then return end
+                    if not AutoPatch.Enabled then return end
+                    if not entitylib.isAlive then return end
+                    if not isEnemy(data.player) then return end
+
+                    local worldPos = data.blockRef.blockPosition * 3
+                    local bed = getBedNear()
+                    if not bed then return end
+                    if (worldPos - bed.Position).Magnitude > PlaceRange.Value then return end
+                    if not isWithinProtectedLayers(worldPos, bed) then return end
+                    if getPlacedBlock(worldPos) then return end
+
+                    local blocks = getBlocks()
+                    if #blocks == 0 then return end
+                    local block = blocks[1]
+
+                    task.spawn(function()
+                        if PlacementSpeed.Value > 0 then
+                            task.wait(PlacementSpeed.Value / 1000)
+                        end
+
+                        if getPlacedBlock(worldPos) then return end
+                        if (entitylib.character.RootPart.Position - worldPos).Magnitude > PlaceRange.Value then return end
+
+                        local old = store.hand and store.hand.tool and getHotbar(store.hand.tool) or nil
+                        local switched = false
+
+                        if Switch.Enabled then
+                            local hotbar = getHotbar(block[3])
+                            if hotbar and hotbarSwitch(hotbar) then
+                                switched = true
+                                task.wait()
                             end
                         end
-                        if BedProtector.Enabled then 
-                            BedProtector:Toggle() 
+
+                        bedwars.placeBlock(worldPos, block[1], false)
+
+                        if switched and old then
+                            task.wait()
+                            hotbarSwitch(old)
+                        end
+                    end)
+                end))
+
+                repeat
+                    local bed = getBedNear()
+                    if bed then
+                        for i, block in getBlocks() do
+                            if i > Layers.Value then
+                                break
+                            end
+                            local switch, old = Switch.Enabled, store.hand and store.hand.tool and getHotbar(store.hand.tool) or nil
+                            local hotbar = nil
+
+                            if switch then
+                                hotbar = getHotbar(block[3])
+                            end
+
+                            for _, pos in getPyramid(i, 3) do
+                                if not BedProtector.Enabled then
+                                    break
+                                end
+                                pos = (bed.CFrame * CFrame.new(pos)).Position
+                                if getPlacedBlock(pos) then
+                                    continue
+                                end
+                                if (entitylib.character.RootPart.Position - pos).Magnitude > PlaceRange.Value then
+                                    continue
+                                end
+                                if hotbar and hotbarSwitch(hotbar) then
+                                    task.wait()
+                                end
+                                task.spawn(bedwars.placeBlock, pos, block[1], false)
+                                task.wait(0.1)
+                            end
+
+                            if switch and old and hotbarSwitch(old) then
+                                task.wait()
+                            end
                         end
                     else
-                        notif('BedProtector', 'Hold blocks in your hand', 5)
-                        BedProtector:Toggle()
+                        if Mode.Value == 'On Key' then
+                            notif('Draco X2', 'Unable to locate bed', 5)
+                            BedProtector:Toggle()
+                        end
                     end
-                else
-                    notif('BedProtector', 'Get closer to your bed', 5)
-                    BedProtector:Toggle()
-                end
+                    task.wait(0.5)
+                    if Mode.Value == 'On Key' then
+                        BedProtector:Toggle()
+                        break
+                    end
+                until not BedProtector.Enabled
             end
         end,
-        Tooltip = 'Creates perfect bed protection layers'
+        Tooltip = 'Automatically places and defends blocks around the bed.'
+    })
+
+    Mode = BedProtector:CreateDropdown({
+        Name = 'Mode',
+        List = {'Toggle', 'On Key'},
+        Default = 'Toggle',
+        Function = function(val)
+            if Smart then
+                Smart.Object.Visible = val == 'Toggle'
+            end
+        end,
+    })
+    Blacklist = BedProtector:CreateTextList({
+        Name = 'Blacklist',
+        Default = {'siege_tnt', 'tnt'},
+    })
+    PlaceRange = BedProtector:CreateSlider({
+        Name = 'Place Range',
+        Min = 1,
+        Max = 30,
+        Default = 15,
+    })
+    Layers = BedProtector:CreateSlider({
+        Name = 'Layers',
+        Min = 1,
+        Max = 8,
+        Default = 3,
+        Suffix = function(v) return v == 1 and 'layer' or 'layers' end,
+        Tooltip = 'How many pyramid layers to build around the bed; set to 1 to only build the closest layer'
+    })
+    Switch = BedProtector:CreateToggle({Name = 'Auto Switch'})
+    Smart = BedProtector:CreateToggle({Name = 'Smart', Default = true})
+    AutoPatch = BedProtector:CreateToggle({
+        Name = 'AutoPatch',
+        Default = false,
+        Tooltip = 'When enabled, automatically replaces blocks broken by enemies within the protected layers'
+    })
+    ProtectedLayers = BedProtector:CreateSlider({
+        Name = 'Protected Layers',
+        Min = 1,
+        Max = 8,
+        Default = 2,
+        Suffix = function(v) return v == 1 and 'layer' or 'layers' end,
+        Tooltip = 'How many pyramid layers AutoPatch will monitor and rebuild when broken by enemies'
+    })
+    PlacementSpeed = BedProtector:CreateSlider({
+        Name = 'Placement Speed',
+        Min = 0,
+        Max = 500,
+        Default = 100,
+        Suffix = 'ms',
+        Tooltip = 'Delay in milliseconds before AutoPatch places a replacement block; 0 for instant'
     })
 end)
 
