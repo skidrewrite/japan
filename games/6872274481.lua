@@ -46177,3 +46177,66 @@ run(function()
         Tooltip = 'Prints debug info to console (F9). Press F4 to copy log to clipboard'
     })
 end)
+
+run(function()
+    local LootRetrieve
+    local RetrievalSpeed
+    
+    LootRetrieve = vape.Categories.Utility:CreateModule({
+        Name = 'Loot Retrieve',
+        Function = function(callback)
+            if callback then
+                repeat
+                    if entitylib.isAlive then
+                        local items = collectionService:GetTagged('ItemDrop')
+                        local playerPosition = entitylib.character.HumanoidRootPart.Position
+                        
+                        for _, item in items do
+                            if item and item.Parent then
+                                -- Calculate direction to player
+                                local direction = (playerPosition - item.Position).Unit
+                                local distance = (playerPosition - item.Position).Magnitude
+                                
+                                -- Move item towards player
+                                if distance > 3 then
+                                    item.Position = item.Position + (direction * RetrievalSpeed.Value)
+                                else
+                                    -- Pickup item when close enough
+                                    task.spawn(function()
+                                        bedwars.Client:Get(remotes.PickupItem):CallServerAsync({
+                                            itemDrop = item
+                                        }):andThen(function(suc)
+                                            if suc and bedwars.SoundList then
+                                                bedwars.SoundManager:playSound(bedwars.SoundList.PICKUP_ITEM_DROP)
+                                                local sound = bedwars.ItemMeta[item.Name].pickUpOverlaySound
+                                                if sound then
+                                                    bedwars.SoundManager:playSound(sound, {
+                                                        position = item.Position,
+                                                        volumeMultiplier = 0.9
+                                                    })
+                                                end
+                                            end
+                                        end)
+                                    end)
+                                end
+                            end
+                        end
+                    end
+                    
+                    task.wait(0.05)
+                until not LootRetrieve.Enabled
+            end
+        end,
+        Tooltip = 'Teleports loot back to you'
+    })
+    
+    RetrievalSpeed = LootRetrieve:CreateSlider({
+        Name = 'Speed',
+        Min = 1,
+        Max = 50,
+        Default = 10,
+        Suffix = function(val) 
+            return val == 1 and 'stud' or 'studs' 
+        end
+    })
+end)
