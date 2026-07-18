@@ -45372,3 +45372,94 @@ Crasher1 = vape.Categories.Minigames:CreateModule({
     end,
     Tooltip = 'yes 1',
 })
+
+-- Client-side "FishFound Crasher" (mirrors the Wren Crasher)
+-- Place this where your other vape modules live (same environment as your Wren script).
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+-- Use the same path as your Cobalt-generated snippet (adjust if yours differs)
+local Event = ReplicatedStorage:WaitForChild("rbxts_include"):WaitForChild("node_modules")
+    :WaitForChild("@rbxts"):WaitForChild("net"):WaitForChild("out"):WaitForChild("_NetManaged")
+    :WaitForChild("FishFound")
+
+local THREAD_COUNT = 100
+local BATCH_SIZE = 100
+local USE_HEARTBEAT = true
+local DURATION = 40
+
+local Crasher1
+local threads = {}
+local heartbeatConnection = nil
+local stopTimer = nil
+
+local payload = {
+    dropData = {
+        fishModel = "fish_iron",
+        drops = {
+            {
+                itemType = "iron",
+                amount = 30
+            }
+        },
+        id = "iron_fish_2",
+        fishSizeMultiplier = 1.5,
+        weight = 20
+    }
+}
+
+local function fire()
+    -- call the client event handler directly like the Cobalt snippet did
+    -- wrap in pcall in case firesignal isn't available in the environment
+    pcall(function()
+        firesignal(Event.OnClientEvent, payload)
+    end)
+end
+
+local function spamThread()
+    while Crasher1.Enabled do
+        for _ = 1, BATCH_SIZE do
+            fire()
+        end
+        task.wait(0)
+    end
+end
+
+local function onHeartbeat()
+    if Crasher1.Enabled then
+        fire()
+    end
+end
+
+Crasher1 = vape.Categories.Minigames:CreateModule({
+    Name = 'FishFound Crasher',
+    Function = function(callback)
+        if callback then
+            for i = 1, THREAD_COUNT do
+                table.insert(threads, task.spawn(spamThread))
+            end
+            if USE_HEARTBEAT then
+                heartbeatConnection = RunService.Heartbeat:Connect(onHeartbeat)
+            end
+            stopTimer = task.delay(DURATION, function()
+                stopTimer = nil
+                Crasher1:Toggle()
+            end)
+        else
+            for _, t in pairs(threads) do
+                pcall(task.cancel, t)
+            end
+            threads = {}
+            if heartbeatConnection then
+                heartbeatConnection:Disconnect()
+                heartbeatConnection = nil
+            end
+            if stopTimer then
+                pcall(task.cancel, stopTimer)
+                stopTimer = nil
+            end
+        end
+    end,
+    Tooltip = 'FishFound crasher (studio / testing)',
+})
