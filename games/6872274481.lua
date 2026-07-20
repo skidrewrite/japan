@@ -28676,11 +28676,11 @@ run(function()
     -- Block overhaul
     local saved = {}
     local stash = Instance.new('Folder')
-    stash.Name = 'KingAutoStash'
+    stash.Name = 'GenvFFLAGStash'
     stash.Parent = vape.gui
     -- Lighting / sky
     local lightStash = Instance.new('Folder')
-    lightStash.Name = 'KingAutoLightStash'
+    lightStash.Name = 'GenvFFLAGLightStash'
     lightStash.Parent = vape.gui
     local addedLighting = {}
     local origLighting = {}
@@ -28884,13 +28884,13 @@ run(function()
         end
     end
 
-    KingAuto = vape.Categories.Render:CreateModule({
+    GenvFFLAG = vape.Categories.Render:CreateModule({
         Name = 'GenvFFLAG',
         Tooltip = 'Flat blocks + grey sky + full bright + no clouds',
         Function = function(callback)
             if callback then
-                repeat task.wait() until store.map or not KingAuto.Enabled
-                if not KingAuto.Enabled then return end
+                repeat task.wait() until store.map or not GenvFFLAG.Enabled
+                if not GenvFFLAG.Enabled then return end
 
                 -- FFlags: if executor supports them, kill textures at engine level (no RenderStepped needed)
                 hasFF = type(setfflag) == 'function' and pcall(setfflag, 'RenderShadowIntensity', '0')
@@ -28926,8 +28926,8 @@ run(function()
                         if part.Parent then part.LocalTransparencyModifier = 0 end
                     end)
                 end
-                KingAuto:Clean(store.map.Blocks.ChildAdded:Connect(function(v)
-                    if not KingAuto.Enabled then return end
+                GenvFFLAG:Clean(store.map.Blocks.ChildAdded:Connect(function(v)
+                    if not GenvFFLAG.Enabled then return end
                     local col = blockColors[v.Name]
                     for _, p in v:GetDescendants() do
                         if p:IsA('BasePart') then p.LocalTransparencyModifier = 1 end
@@ -28940,8 +28940,8 @@ run(function()
                             end
                         end
                     end)
-                    KingAuto:Clean(v.DescendantAdded:Connect(function(d)
-                        if not KingAuto.Enabled then return end
+                    GenvFFLAG:Clean(v.DescendantAdded:Connect(function(d)
+                        if not GenvFFLAG.Enabled then return end
                         if d:IsA('BasePart') then
                             flattenPart(d, col)
                         elseif d:IsA('SurfaceAppearance') or d:IsA('Decal') or d:IsA('Texture') then
@@ -28964,8 +28964,8 @@ run(function()
                             if col then pcall(applyPart, v, col) end
                         end
                     end
-                    KingAuto:Clean(char.DescendantAdded:Connect(function(v)
-                        if not KingAuto.Enabled then return end
+                    GenvFFLAG:Clean(char.DescendantAdded:Connect(function(v)
+                        if not GenvFFLAG.Enabled then return end
                         if v:IsA('BasePart') then
                             local col = getToolBlockColor(v, char)
                             if col then flattenPart(v, col) end
@@ -28975,8 +28975,8 @@ run(function()
                     end))
                 end
                 if lplr.Character then watchChar(lplr.Character) end
-                KingAuto:Clean(lplr.CharacterAdded:Connect(function(newChar)
-                    if KingAuto.Enabled then watchChar(newChar) end
+                GenvFFLAG:Clean(lplr.CharacterAdded:Connect(function(newChar)
+                    if GenvFFLAG.Enabled then watchChar(newChar) end
                 end))
 
                 -- First-person ViewModel lives under Camera, not the character
@@ -28990,8 +28990,8 @@ run(function()
                     end
                 end
                 for _, v in cam:GetDescendants() do flattenCamDescendant(v) end
-                KingAuto:Clean(cam.DescendantAdded:Connect(function(v)
-                    if KingAuto.Enabled then flattenCamDescendant(v) end
+                GenvFFLAG:Clean(cam.DescendantAdded:Connect(function(v)
+                    if GenvFFLAG.Enabled then flattenCamDescendant(v) end
                 end))
                 local function hasBlockAncestor(inst)
                     local p = inst.Parent
@@ -29000,8 +29000,8 @@ run(function()
                         p = p.Parent
                     end
                 end
-                KingAuto:Clean(workspace.DescendantAdded:Connect(function(v)
-                    if not KingAuto.Enabled then return end
+                GenvFFLAG:Clean(workspace.DescendantAdded:Connect(function(v)
+                    if not GenvFFLAG.Enabled then return end
                     if v:IsA('SurfaceAppearance') or v:IsA('Decal') or v:IsA('Texture') then
                         if hasBlockAncestor(v) then pcall(function() v:Destroy() end) end
                     elseif v:IsA('Model') and blockColors[v.Name] then
@@ -29012,8 +29012,8 @@ run(function()
                     end
                 end))
                 if not hasFF then
-                    KingAuto:Clean(game:GetService('RunService').RenderStepped:Connect(function()
-                        if not KingAuto.Enabled then return end
+                    GenvFFLAG:Clean(game:GetService('RunService').RenderStepped:Connect(function()
+                        if not GenvFFLAG.Enabled then return end
                         local blks = store.map:FindFirstChild('Blocks')
                         if not blks then return end
                         for _, v in blks:GetDescendants() do
@@ -29062,14 +29062,14 @@ run(function()
                 atmo.Parent  = lightingService
                 table.insert(addedLighting, atmo)
                 -- If game tries to re-add a Sky, immediately remove it
-                KingAuto:Clean(lightingService.ChildAdded:Connect(function(child)
+                GenvFFLAG:Clean(lightingService.ChildAdded:Connect(function(child)
                     if child:IsA('Sky') or (child:IsA('Atmosphere') and child ~= atmo) then
                         child.Parent = lightStash
                     end
                 end))
                 -- Fight game resets of Lighting/Fog properties
                 local lightChanged = false
-                KingAuto:Clean(lightingService.Changed:Connect(function(prop)
+                GenvFFLAG:Clean(lightingService.Changed:Connect(function(prop)
                     if lightChanged then return end
                     if prop == 'FogEnd' or prop == 'FogStart' or prop == 'FogColor' or
                        prop == 'Ambient' or prop == 'OutdoorAmbient' or prop == 'Brightness' or
@@ -29126,7 +29126,7 @@ run(function()
             end
         end,
     })
-    BrightnessSlider = KingAuto:CreateSlider({
+    BrightnessSlider = GenvFFLAG:CreateSlider({
         Name = 'Brightness',
         Min = 0,
         Max = 10,
