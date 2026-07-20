@@ -1,7 +1,7 @@
 local run = function(func)
     local ok, err = pcall(func)
     if not ok then
-        warn('[GenvSkid] module failed to load: ' .. tostring(err))
+        warn('[GenvPrivate] module failed to load: ' .. tostring(err))
     end
 end
 local vapeEvents = setmetatable({}, {
@@ -28230,176 +28230,339 @@ run(function()
 end)
 
 run(function()
-	local SilentAura
-	local ExtendedRange
-	local ExtendedRangeSlider
-	local silentAttackRemote
-	local lastHitTime = 0
-	local BASE_RANGE = 13.8
+    local SilentAura
+    local Targets
+    local Speed
+    local Range
+    local Angle
+    local Mode
+    local Area
+    local LegitAura
+    local Mouse
+    local NoSwing
+    local Limit
+    local SilentAim
+    local SwingTime
+    local Perfect
+    
+    local Show
+    local Targetcolor
+    local Attackcolor
 
-	task.spawn(function()
-		silentAttackRemote = bedwars.Client:Get(remotes.AttackEntity)
-	end)
+    local AttackRemote = {FireServer = function(self, ...) end}
+    local SwingMissRemote = {FireServer = function(self, ...) end}
+    task.spawn(function()
+        AttackRemote = bedwars.Client:Get(remotes.AttackEntity).instance
+    end)
+    task.spawn(function()
+        SwingMissRemote = bedwars.Client:Get('SwordSwingMiss').instance
+    end)
 
-	local _saT4HitCount = {}
-	local _saT4HitTick = {}
+    local function getAttackData()
+        if not entitylib.isAlive then
+            return false
+        end
+        if Mouse.Enabled then
+            if not inputService:IsMouseButtonPressed(0) and (tick() - bedwars.SwordController.lastSwing) > 0.3 then
+                return false
+            end
+        end
+        if LegitAura.Enabled and (tick() - bedwars.SwordController.lastSwing) > 0.3 then
+            return false
+        end
+    
+        if (lplr.Character:GetAttribute('StunnedUntilTime') or 0) - workspace:GetServerTimeNow() > 0 then
+            return false
+        end
+        if bedwars.AppController:isLayerOpen(bedwars.UILayers.MAIN) then
+            return false
+        end
+    
+        local sword = Limit.Enabled and store.hand or store.tools.sword
+        if not sword or not sword.tool then
+            return false
+        end
+    
+        local meta = bedwars.ItemMeta[sword.tool.Name]
+        if Limit.Enabled then
+            if store.hand.toolType ~= 'sword' or bedwars.DaoController.chargingMaid then
+                return false
+            end
+        end
+    
+        return sword, meta
+    end
+    
+    local cache = {}
+    local function getAim(ent)
+        if Area.Value == 'Closest' then
+            if not cache[ent.Character] then
+                cache[ent.Character] = ent.Character:GetChildren()
+            end
+            local localPosition, magnitude, part = inputService.GetMouseLocation(inputService), 9e9, nil
+            for _, v in cache[ent.Character] do
+                if v and v.Parent and v:IsA('BasePart') then
+                    local position, vis = gameCamera.WorldToViewportPoint(gameCamera, v.Position)
+    
+                    if vis then
+                        local mag = (localPosition - Vector2.new(position.x, position.y)).Magnitude
+    
+                        if mag < magnitude then
+                            magnitude = mag
+                            part = v
+                        end
+                    end
+                end
+            end
+            if part then
+                return part.Position
+            end
+        end
+        return ent.RootPart.Position
+    end
+    
+    local function ease(t)
+        return t < 0.5 and 4 * t * t * t or 1 - math.pow(-2 * t + 2, 3) / 2
+    end
+    
+    local function findAim(localcframe, ent, fps, started)
+        local prog, rng = ease(math.min((tick() - started) / (1 / (Speed.Value * 0.5)), 1)), Random.new()
+        local speed = Speed.Value * prog
+        return localcframe:Lerp(CFrame.lookAt(localcframe.p, getAim(ent) + Vector3.new((rng:NextNumber() - 0.5) * 15 * fps, (rng:NextNumber() - 0.5) * 15 * fps, (rng:NextNumber() - 0.5) * 15 * fps)), speed * fps), speed
+    end
+    
+    local box = Instance.new('BoxHandleAdornment')
+    box.Adornee = nil
+    box.AlwaysOnTop = true
+    box.Size = Vector3.new(3, 5, 3)
+    box.CFrame = CFrame.new(0, -0.5, 0)
+    box.ZIndex = 0
+    box.Parent = vape.gui
+    
+    SilentAura = vape.Categories.Combat:CreateModule({
+        Name = 'Silent Aura',
+        Function = function(callback)
+            if callback then
+                local lastent, lastfound = nil, 0
+                local foundat = tick()
+                local lastattacked = 0
+    
+                SilentAura:Clean(runService.PostSimulation:Connect(function(dt)
+                    if entitylib.isAlive and tick() - lastfound < 0.5 then
+                        targetinfo.Targets[lastent] = tick() + 0.5
+                        entitylib.character.Humanoid.AutoRotate = not SilentAim.Enabled
+                        local cframe, speed = findAim(gameCamera.CFrame, lastent, dt, foundat)
+                        if SilentAim.Enabled then
+                            entitylib.character.RootPart.CFrame = entitylib.character.RootPart.CFrame:Lerp(CFrame.lookAt(entitylib.character.RootPart.Position, Vector3.new(lastent.RootPart.Position.X, entitylib.character.RootPart.Position.Y, lastent.RootPart.Position.Z)), (speed + 2) * dt)
+                        else
+                            gameCamera.CFrame = cframe
+                        end
+                    elseif entitylib.isAlive then
+                        entitylib.character.Humanoid.AutoRotate = true
+                    end
+                end))
+    
+                local frames = 9e9
+                repeat
+                    task.wait()
+                    local sword, meta = getAttackData()
+                    if sword then
+                        local localPosition = entitylib.character.RootPart.Position
+                        local ent = entitylib.EntityPosition({
+                            Origin = localPosition,
+                            Range = bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE + Range.Value,
+                            Wallcheck = Targets.Walls.Enabled or nil,
+                            Part = 'RootPart',
+                            Players = Targets.Players.Enabled,
+                            NPCs = Targets.NPCs.Enabled,
+                            Limit = 1,
+                            Sort = sortmethods[Mode.Value or 'Distance'],
+                        })
+                        local Slider = tick() - lastattacked < 0.1 and Attackcolor or Targetcolor
+                        box.Adornee = Show.Enabled and ent and ent.RootPart or nil
+                        box.Transparency = 1 - Slider.Opacity
+                        box.Color3 = Color3.fromHSV(Slider.Hue, Slider.Sat, Slider.Value)
+                        if ent then
+                            if not store.hand or store.hand.tool ~= sword.tool then
+                                local hotbar = getHotbar(sword.tool)
+                                if hotbar then
+                                    hotbarSwitch(hotbar)
+                                else
+                                    continue
+                                end
+                            end
+                            if frames > 50 then
+                                frames = 0
+                            end
+                            frames += 1
+    
+                            local localfacing = (inputService.KeyboardEnabled and gameCamera or entitylib.character.RootPart).CFrame.LookVector * Vector3.new(1, 0, 1)
+                            local delta, flat = (ent.RootPart.Position - localPosition), ((ent.RootPart.Position - localPosition) * Vector3.new(1, 0, 1))
+                            local facingdot = flat.Magnitude > 0 and localfacing.Magnitude > 0 and (localfacing / localfacing.Magnitude):Dot(flat / flat.Magnitude) or 0
+                            if facingdot < math.cos(math.rad(Angle.Value) / 2) then
+                                continue
+                            end
+    
+                            if not LegitAura.Enabled and (tick() - bedwars.SwordController.lastSwing) >= (Perfect.Enabled and (meta.sword.attackSpeed or 0.11) or math.max(SwingTime.Value, 0.11)) then
+                                bedwars.SwordController:playSwordEffect(meta, false)
+                                bedwars.SwordController.lastSwing = tick()
+                            end
 
-	local function fireSilentAttack(attackData)
-		if not silentAttackRemote then return end
-		local _atkPlr = playersService:GetPlayerFromCharacter(attackData.entityInstance)
-		if _atkPlr then
-			local targetTier = getAccountTier(_atkPlr)
-			if targetTier >= 99 then return end
-			if targetTier >= 4 and getAccountTier(lplr) == 0 then
-				local uid = _atkPlr.UserId
-				local now = tick()
-				if not _saT4HitTick[uid] or now - _saT4HitTick[uid] >= 10 then
-					_saT4HitTick[uid] = now
-					_saT4HitCount[uid] = 0
-				end
-				_saT4HitCount[uid] = (_saT4HitCount[uid] or 0) + 1
-				if _saT4HitCount[uid] > 32 then return end
-			end
-			if not select(2, whitelist:get(_atkPlr)) then return end
-		end
-		local selfpos = attackData.validate.selfPosition.value
-		local targetpos = attackData.validate.targetPosition.value
-		local actualDistance = (selfpos - targetpos).Magnitude
-		if actualDistance > 14.4 and actualDistance <= 30 then
-			local direction = (targetpos - selfpos).Unit
-			local moveDistance = math.min(actualDistance - 14.3, 8)
-			attackData.validate.selfPosition.value = selfpos + (direction * moveDistance)
-			local pullDistance = math.min(actualDistance - 14.3, 4)
-			attackData.validate.targetPosition.value = targetpos - (direction * pullDistance)
-			attackData.validate.raycast = attackData.validate.raycast or {}
-			attackData.validate.raycast.cameraPosition = attackData.validate.raycast.cameraPosition or {}
-			attackData.validate.raycast.cursorDirection = attackData.validate.raycast.cursorDirection or {}
-			local extendedOrigin = selfpos + (direction * math.min(actualDistance - 12, 15))
-			attackData.validate.raycast.cameraPosition.value = extendedOrigin
-			attackData.validate.raycast.cursorDirection.value = direction
-		end
-		return silentAttackRemote:SendToServer(attackData)
-	end
+                            if lastent ~= ent or facingdot < -0.5 then
+                                foundat = tick()
+                            end
+                            lastent, lastfound = ent, tick()
 
-	local function getMaxRange()
-		local base = BASE_RANGE
-		if ExtendedRange and ExtendedRange.Enabled and ExtendedRangeSlider then
-			base = base + ExtendedRangeSlider.Value
-		end
-		return base
-	end
+                            local hitDelay = Perfect.Enabled and (meta.sword.attackSpeed or 0.33) or math.max(SwingTime.Value, 0.33)
+                            local current = tick()
+                            if (current - lastattacked) < hitDelay then
+                                continue
+                            end
 
-	local function canHitWithHitreg()
-		local currentTime = tick()
-		local hitreg = math.random(340, 350) / 10
-		local delayBetweenHits = 10 / hitreg
-		if currentTime - lastHitTime >= delayBetweenHits then
-			lastHitTime = lastHitTime + delayBetweenHits
-			if currentTime - lastHitTime > delayBetweenHits then
-				lastHitTime = currentTime
-			end
-			return true
-		end
-		return false
-	end
+                            if delta.Magnitude > bedwars.CombatConstant.RAYCAST_SWORD_CHARACTER_DISTANCE then
+                                lastattacked += hitDelay
+                                if current - lastattacked > hitDelay then lastattacked = current end
+                                pcall(SwingMissRemote.FireServer, SwingMissRemote, {chargeRatio = 0, weapon = sword.tool})
+                                continue
+                            end
+                            lastattacked += hitDelay
+                            if current - lastattacked > hitDelay then lastattacked = current end
 
-	local function gatherSilentTargets(selfpos, maxRange)
-		local targets = {}
-		local allEnts = entitylib.List
-		for i = 1, #allEnts do
-			local ent = allEnts[i]
-			if not ent.RootPart then continue end
-			if not ent.Targetable then continue end
-			if not ent.Health or ent.Health <= 0 then continue end
-			local dist = (ent.RootPart.Position - selfpos).Magnitude
-			if dist <= maxRange then
-				table.insert(targets, {ent = ent, dist = dist})
-			end
-		end
-		table.sort(targets, function(a, b) return a.dist < b.dist end)
-		return targets
-	end
-
-	SilentAura = vape.Categories.Combat:CreateModule({
-		Name = 'SilentAura',
-		Function = function(callback)
-			if not callback then return end
-			task.spawn(function()
-				repeat
-					task.wait(1 / 60)
-					if not SilentAura.Enabled then break end
-
-					if (tick() - bedwars.SwordController.lastSwing) > 0.2 then continue end
-
-					local ok, open = pcall(function() return bedwars.AppController:isLayerOpen(bedwars.UILayers.MAIN) end)
-					if ok and open then continue end
-
-					if tick() - store.silasAbilityTime < 2.2 then continue end
-					if tick() - store.terraStompTime < 0.7 then continue end
-					if tick() - store.terraKickTime < 0.5 then continue end
-
-					if store.hand.toolType ~= 'sword' then continue end
-					if bedwars.DaoController and bedwars.DaoController.chargingMaid then continue end
-
-					local sword = store.hand
-					if not sword or not sword.tool then continue end
-					local meta = bedwars.ItemMeta[sword.tool.Name]
-					if not meta or not meta.sword then continue end
-
-					if not entitylib.isAlive then continue end
-					local selfpos = entitylib.character.RootPart.Position
-
-					local maxRange = getMaxRange()
-					local targets = gatherSilentTargets(selfpos, maxRange)
-					if #targets == 0 then continue end
-
-					if not canHitWithHitreg() then continue end
-
-					local ent = targets[1].ent
-					if not ent.RootPart then continue end
-
-					local targetPos = ent.RootPart.Position
-					local camPos = gameCamera.CFrame.Position
-					local dir = (targetPos - camPos).Unit
-
-					fireSilentAttack({
-						weapon = sword.tool,
-						entityInstance = ent.Character,
-						chargedAttack = {chargeRatio = 0},
-						validate = {
-							raycast = {
-								cameraPosition = {value = camPos},
-								cursorDirection = {value = dir}
-							},
-							targetPosition = {value = targetPos},
-							selfPosition = {value = selfpos}
-						}
-					})
-				until not SilentAura.Enabled
-			end)
-		end
-	})
-
-	ExtendedRange = SilentAura:CreateToggle({
-		Name = 'Extended Range',
-		Function = function(callback)
-			if ExtendedRangeSlider then
-				ExtendedRangeSlider.Object.Visible = callback
-			end
-		end
-	})
-
-	ExtendedRangeSlider = SilentAura:CreateSlider({
-		Name = 'Extend Range',
-		Min = 1,
-		Max = 3,
-		Default = 1,
-		Darker = true,
-		Visible = false,
-		Suffix = function(val)
-			return val == 1 and 'stud' or 'studs'
-		end
-	})
+                            local dir = CFrame.lookAt(localPosition, ent.RootPart.Position).LookVector
+                            local pos = localPosition + dir * math.max(delta.Magnitude - 14.4, 0)
+                            bedwars.SwordController.lastAttack = workspace:GetServerTimeNow()
+                            AttackRemote:FireServer({
+                                weapon = sword.tool,
+                                chargedAttack = {chargeRatio = 0},
+                                entityInstance = ent.Character,
+                                validate = {
+                                    raycast = {
+                                        cameraPosition = {value = pos},
+                                        cursorDirection = {value = dir},
+                                    },
+                                    targetPosition = {
+                                        value = ent.RootPart.Position,
+                                    },
+                                    selfPosition = {value = pos},
+                                },
+                            })
+                        else
+                            lastfound = 0
+                            frames = 0
+                        end
+                    else
+                        box.Adornee = nil
+                        lastfound = 0
+                        frames = 0
+                    end
+                until not SilentAura.Enabled
+            else
+                if entitylib.isAlive then
+                    entitylib.character.Humanoid.AutoRotate = true
+                end
+                box.Adornee = nil
+            end
+        end,
+        Tooltip = 'Automatically aims and attacks nearby target',
+    })
+    
+    Targets = SilentAura:CreateTargets({
+        Players = true,
+        NPCs = true,
+    })
+    Speed = SilentAura:CreateSlider({
+        Name = 'Aim speed',
+        Min = 1,
+        Max = 10,
+        Default = 6,
+        Decimal = 5,
+        Tooltip = 'How fast the Aura is going to aim',
+    })
+    SwingTime = SilentAura:CreateSlider({
+        Name = 'Swing time',
+        Darker = true,
+        Visible = false,
+        Min = 0,
+        Max = 0.5,
+        Default = 0.42,
+        Decimal = 100,
+    })
+    Range = SilentAura:CreateSlider({
+        Name = 'Extra swing distance',
+        Tooltip = 'Where you will start swinging, not attacking',
+        Min = 0,
+        Max = 6,
+        Suffix = function(val)
+            return val <= 1 and 'stud' or 'studs'
+        end,
+        Decimal = 5,
+        Default = 3,
+    })
+    Angle = SilentAura:CreateSlider({
+        Name = 'Max angle',
+        Min = 1,
+        Max = 360,
+        Default = 180,
+    })
+    local methods = {'Damage', 'Distance'}
+    for i in sortmethods do
+        if not table.find(methods, i) then
+            table.insert(methods, i)
+        end
+    end
+    Mode = SilentAura:CreateDropdown({
+        Name = 'Target mode',
+        List = methods,
+        Tooltip = 'How Aura should prioritize targets',
+        Default = 'Health',
+    })
+    Area = SilentAura:CreateDropdown({
+        Name = 'Target area',
+        Tooltip = 'Where the Aura will aim towards',
+        List = {'Center', 'Closest'},
+        Default = 'Center',
+        Visible = false,
+    })
+    Perfect = SilentAura:CreateToggle({
+        Name = 'Perfect Swing',
+        Tooltip = 'Follows tool\'s swing time',
+        Function = function(callback)
+            SwingTime.Object.Visible = not callback
+        end,
+        Default = true,
+    })
+    Mouse = SilentAura:CreateToggle({Name = 'Require mouse down'})
+    LegitAura = SilentAura:CreateToggle({Name = 'Swing only'})
+    SilentAim = SilentAura:CreateToggle({
+        Name = 'Silent Aim',
+        Tooltip = 'Uses catvape\'s aiming technology to silently aim while looking legit',
+        Default = true,
+        Function = function(callback)
+            Area.Object.Visible = not callback
+        end,
+    })
+    Show = SilentAura:CreateToggle({
+        Name = 'Show target',
+        Default = true,
+        Function = function(callback)
+            pcall(function()
+                Targetcolor.Object.Visible = callback
+                Attackcolor.Object.Visible = callback
+            end)
+        end,
+    })
+    Targetcolor = SilentAura:CreateColorSlider({
+        Name = 'Target color',
+        Darker = true,
+        DefaultOpacity = 0.5,
+        DefaultHue = 1,
+    })
+    Attackcolor = SilentAura:CreateColorSlider({
+        Name = 'Attack color',
+        Darker = true,
+        DefaultOpacity = 0.5,
+    })
+    Limit = SilentAura:CreateToggle({Name = 'Limit to items'})
 end)
 
 run(function()
