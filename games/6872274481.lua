@@ -28496,7 +28496,7 @@ run(function()
             return val <= 1 and 'stud' or 'studs'
         end,
         Decimal = 5,
-        Default = 3,
+        Default = 6,
     })
     Angle = SilentAura:CreateSlider({
         Name = 'Max angle',
@@ -35827,8 +35827,8 @@ run(function()
     ContinueSwingTime = Killaura:CreateSlider({
         Name = 'Swing Duration',
         Min = 0,
-        Max = 0.0703,
-        Default = 0.0703,
+        Max = 0.07026,
+        Default = 0.07026,
         Decimal = 10,
         Suffix = 's',
         Visible = false
